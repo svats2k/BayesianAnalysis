@@ -1,0 +1,164 @@
+---
+title: "Chapter 05"
+author: "Srivatsa Srinath"
+date: "10/04/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE, message = FALSE, error = FALSE)
+library(dplyr); 
+library(tidyr); 
+library(rstan); 
+library(skimr); 
+library(ggplot2); 
+library(ggthemes)
+library(rethinking)
+library(bayesplot)
+
+theme_set(theme_tufte(base_family = 'sans'))
+```
+
+Reading in the dataset
+
+```{r}
+
+d <- data("WaffleDivorce")
+d <- WaffleDivorce; 
+rm(WaffleDivorce)
+
+```
+
+
+Studying the relationsip between wafflehouses per million and divorce rate
+
+```{r}
+
+ggplot(d) +
+  stat_smooth(aes(WaffleHouses/Population, Divorce), method = 'lm', level = .89, 
+              fullrange = T, color = 'black', alpha = .1, lwd = .3) +
+  geom_point(aes(WaffleHouses/Population, Divorce), shape=21, color='dodgerblue') +
+  scale_x_continuous(limits = c(0,50)) +
+  labs(x='WaffleHouses per Million', y='Divorce Rate')
+
+```
+
+Standardize the parameters
+
+```{r}
+
+d <- d %>% mutate(MedianMarraige_z=(MedianAgeMarriage - mean(MedianAgeMarriage))/sd(MedianAgeMarriage),
+                  Marriage_z=(Marriage - mean(Marriage))/sd(Marriage))
+
+```
+
+
+```{stan, output.var="m05_1"}
+data {
+  int<lower=0> N;
+  vector[N] divorce;
+  vector[N] median_age_z;
+}
+parameters {
+  real a;
+  real bA;
+  real<lower=0, upper=10> sigma;
+}
+model {
+  a ~ normal(10, 10);
+  bA ~ normal(0, 0.5);
+  divorce ~ normal(a + bA * median_age_z, sigma);
+
+  //vector[N] mu = a + bA * median_age_z;
+  //target += normal_lpdf(divorce | mu, sigma);
+  //target += normal_lpdf(a | 10, 10);
+  //target += normal_lpdf(bA | 0, 10);
+  
+}
+
+```
+
+Prior Predictive Simulations
+```{r}
+
+model = "
+data {
+  int<lower=0> N;
+  vector[N] divorce;
+  vector[N] median_age_z;
+}
+parameters {
+  real a;
+  real bA;
+  real<lower=0, upper=10> sigma;
+}
+model {
+  a ~ normal(10, 10);
+  bA ~ normal(0, 0.5);
+  divorce ~ normal(a + bA * median_age_z, sigma);
+
+  //vector[N] mu = a + bA * median_age_z;
+  //target += normal_lpdf(divorce | mu, sigma);
+  //target += normal_lpdf(a | 10, 10);
+  //target += normal_lpdf(bA | 0, 10);
+  
+}
+"
+
+fit <- stan(model_code = model, iter = 2000)
+
+
+```
+
+
+
+Posterior predictive simulations
+
+```{r}
+
+dat <- list(N=NROW(d),
+            divorce=d$Divorce,
+            median_age_z=d$MedianMarraige_z)
+
+fit_05_01 <- sampling(m05_1, data=dat)
+
+```
+
+```{r}
+
+traceplot(fit_05_01)
+plot(fit_05_01)
+```
+
+
+```{r}
+
+mcmc_acf(fit_05_01)
+mcmc_areas_ridges(fit_05_01)
+mcmc_dens(fit_05_01)
+mcmc_dens_chains(fit_05_01)
+mcmc_dens_overlay(fit_05_01)
+mcmc_hist(fit_05_01)
+mcmc_trace(fit_05_01)
+mcmc_intervals(fit_05_01)
+mcmc_violin(fit_05_01)
+```
+
+```{r}
+list_of_draws <- rstan::extract(fit_05_01)
+list_of_draws$a
+
+
+fit_summary <- summary(fit_05_01)
+print(fit_summary$summary)
+
+
+cat(get_stancode(m05_1))
+
+inits <- get_inits(fit_05_01)
+inits[[2]]
+
+get_elapsed_time(fit_05_01)
+```
+

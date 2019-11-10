@@ -1,0 +1,267 @@
+---
+title: "Chapter 4 Notes"
+output: html_document
+---
+
+```{r include=FALSE}
+
+library(rethinking)
+library(pracma)
+```
+
+## Simulating random walk on a soccer field
+
+```{r}
+pos <- replicate(1000, sum(runif(16,-1,1)))
+par(mfrow=c(1,2))
+simplehist(pos, xlab='Position')
+plot(density(pos))
+```
+# Modeling hieghts
+
+```{r}
+data("Howell1")
+d <- Howell1
+str(d)
+par(mfrow=c(1,2))
+simplehist(d$height)
+dens(d$height)
+
+
+# Prior distribution for mean of height
+par(mfrow=c(2,2))
+curve(dnorm(x,178,20), from = 100, to = 250, col='blue', xlab = 'mu', ylab = 'density')
+mtext('mu ~ dnorm(178,20')
+# Prior distribution for sigma of height
+curve(dunif(x, 0,50), from = -10, to = 60, col='blue', xlab = 'sigma', ylab = 'density')
+mtext('sigma ~ unif(0,50)')
+## Prior predictive simulations
+### Height distributions
+sample_mu <- rnorm(1e4, 178, 20)
+sample_signma <- runif(1e4, 0, 50)
+prior_h <- rnorm(1e4, sample_mu, sample_signma)
+dens(prior_h, xlab='height', ylab='Density')
+mtext('h ~ dnorm(mu, sigma)')
+### assuming a more liberal prior / flatter prior
+sample_mu <- rnorm(1e4, 178, 100)
+prior_h <- rnorm(1e4, sample_mu, sample_signma)
+dens(prior_h, xlab='height', ylab='Density', col='red')
+mtext('h ~ dnorm(mu, sigma)
+      mu ~ dnorm(178,100')
+```
+
+## Grid approximation for the posterior distribution
+The strategy is the same grid approximation strategy as before (page39). But now there are two dimensions, and so there is a geometric (literally) increase in bother. The algorithm is mercifully short,however,if not transparent. Think of the code as being six distinct commands. The first two lines of code just establish the range of µ and σ values, respectively, to calculate over, as well as how many points to calculate in-between. The third line of code expands those chosen µ and σ values into a matrix of all of the combinations of µ and σ. This matrix is stored in a dataframe, post. In the monstrous fourth line of code, shown in expanded form to make it easier to read, the log-likelihood at each combination of µ and σ is computed. This line looks so awful, because we havetobecarefulheretodoeverythingonthelogscale. Otherwiseroundingerrorwillquicklymakeallofthe posterior probabilities zero. So what sapply does is pass the unique combination of µ and σ on each row of posttoafunctionthatcomputesthelog-likelihood of each observed height, and adds all of these log-likelihoods together(sum). In the fifth line, we multiply the prior by the likelihood to get the product that is proportional totheposteriordensity. The priors ar ealso on the log scale,and so we add them to the log-likelihood, which is equivalent to multiplying the raw densities by the likelihood. Finally, the obstacle for getting back on the probability scale is that rounding error is always a threat when moving from log-probability to probability. If you use the obvious approach, like exp( post\$prod ), you will get a vector full of zeros, which is not very helpful. This is a result of R’s rounding very small probabilities to zero. Remember,inlargesamples,alluniquesamplesare unlikely. This is why you have to work with log-probability. The code in the box dodges this problem by scaling all of the log-products by the maximum log-product. As a result,the values in post$prob are not all zero,but they also aren’t exactly probabilities. Instead they are relative posterior probabilities. But that’s good enough for what we wish to do with these values. 
+```{r}
+N <- 200
+mu.list <- seq(from=140, to=160, length.out = N) # establish the range for mu
+sigma.list <- seq(from=4, to=9, length.out = N) # establish the range for sigma
+post <- expand.grid(mu=mu.list, sigma=sigma.list) # creating a matrix of all possible combinations of mu and sigma
+# computing log likelihood of each combinations of mu and sigma, converting to log, if not, rounding off error will take it to zero
+post$LL <- sapply(1:nrow(post), function(i) sum(dnorm(
+  d$height,
+  mean=post$mu[i],
+  sd=post$sigma[i],
+  log = TRUE )))
+post$prod <- post$LL + dnorm(post$mu, 178, 20, TRUE) + dunif(post$sigma, 0, 50, TRUE)
+post$prob <- exp(post$prod - max(post$prod))
+
+sample.rows <- sample(1:nrow(post), size=1e4, replace = TRUE, prob = post$prob)
+sample.mu <- post$mu[sample.rows]
+sample.sigma <- post$sigma[sample.rows]
+plot(sample.mu, sample.sigma, cex=0.5, pch=16, col=col.alpha(rangi2,0.1))
+```
+
+# Modeling with QUAP
+
+```{r}
+d2 <- d[ d$age >= 18 , ]
+str(d2)
+#Defining the model using R's syntax
+flist <- alist(
+  height ~ dnorm(mu, sigma),
+  mu ~ dnorm(178, 20),
+  sigma ~ dunif(0,50)
+)
+
+m4.1 <- quap(flist, data = d2) # with random start point for hill climbing
+
+# start <- list(mu=mean(d2$height), sd = std(d2$height))
+# m4.1 <- quap(flist = flist, data = d2, start = start) # with random start point for hill climbing
+precis(m4.1)
+
+# Sampling from the quap model
+
+post <- extract.samples(m4.1, n=100)
+head(post)
+precis(post)
+
+vcov(m4.1)
+```
+
+# Building simple regression models
+
+```{r}
+plot(d$weight ~ d$height)
+```
+The strategy is to make the mean of the gaussian distribution into a linear function of the predictor variables and
+the other new paramters we want to invent.  Once you introduce predictor variables, the mean µ is no longer a parameter to be estimated. Rather,as seen in the second line of the model,µi is constructed from other parameters, α and β, and the observed variable x. This line is not a stochastic relationship—there is no ∼ in it, but rather an = in it — because the definition of µi is deterministic. That is to say that,once we know α and β and xi, we know µi with certainty.
+
+With linear model some of the parameters stand for the strength of the association between mean of the outcome and the value of the other variable.
+
+## Modeling prior distribution
+```{r}
+N <- 100
+a <- rnorm(N, 178,20)
+b <- rnorm(N, 0, 10)
+
+# We now ave 100 pairs of a and b.  We need to draw a line for each
+plot( NULL , xlim=range(d2$weight) , ylim=c(-100,400) , xlab="weight" , ylab="height" )
+abline( h=0 , lty=2 )
+abline( h=272 , lty=1 , lwd=0.5 )
+mtext( "b ~ dnorm(0,10)" )
+xbar <- mean(d2$weight)
+for ( i in 1:N )
+  curve( a[i] + b[i]*(x - xbar) ,
+         from=min(d2$weight),
+         to=max(d2$weight),
+         add=TRUE,
+         col=col.alpha("black",0.2) )
+```
+
+Coming up with a bit more sensible prior, use a log normal distribution.
+```{r}
+b <- rlnorm(N, 0,1)
+# We now ave 100 pairs of a and b.  We need to draw a line for each
+plot( NULL , xlim=range(d2$weight) , ylim=c(-100,400) , xlab="weight" , ylab="height" )
+abline( h=0 , lty=2 )
+abline( h=272 , lty=1 , lwd=0.5 )
+mtext( "b ~ rlnorm(0,1)" )
+xbar <- mean(d2$weight)
+for ( i in 1:N )
+  curve( a[i] + b[i]*(x - xbar) ,
+         from=min(d2$weight),
+         to=max(d2$weight),
+         add=TRUE,
+         col=col.alpha("black",0.2) )
+```
+
+# Linear Model with Quap
+
+```{r}
+library(rethinking)
+data(Howell1)
+d <- Howell1
+d2 <- d[ d$age >= 18 , ]
+
+# define the average weight, x-bar
+xbar <- mean(d2$weight)
+# fit model 
+m4.3 <- quap( alist( height ~ dnorm( mu , sigma ) ,
+                     mu <- a + b*( weight - xbar ) ,
+                     a ~ dnorm( 178 , 20 ) ,
+                     b ~ dlnorm( 0 , 1 ) ,
+                     sigma ~ dunif( 0 , 50 ) ) ,
+              data=d2 )
+precis(m4.3)
+```
+
+Keep in mind, the above mentioned approach does not guarantee that the relationship between the height and weight is linear.  However, the model approach approach we have chosen only fits lines.  Given that we have chosen lines, those with a slope of ~0.9 are the most plausible.
+
+# Posterior distribution
+
+Here we try to plot
+(a) raw data
+(b) extract samples from the posterior distribution
+(c) compute mean values for a and b
+(d) draw the implied line
+
+```{r}
+plot(height ~ weight, data = d2, col=rangi2)
+post <- extract.samples(m4.3)
+a_map <- mean(post$a)
+b_map <- mean(post$b)
+
+curve(a_map + b_map*(x-xbar), add=TRUE)
+
+
+```
+
+The posterior mean line is just the most plausible line in the infinite universe of lines available in the posterior distribution.  Every comibination of a and b is a line and has a posterior probability, given the posterior distribution. It could be that there are many lines with nearly the same posterior probability as the average line.
+
+Let us now try to build an interval.  let us take a single weight 50 Kgs and the come up with a list of 10,000 values of mu (height) that could have given us an individual who could weigh 50 Kgs.
+
+```{r}
+
+post <- extract.samples(m4.3)
+mu_at_50 <- post$a + post$b*(50 -xbar)
+
+dens(x = mu_at_50, col=rangi2, lwd=2)
+HPDI(mu_at_50,prob = 0.89)
+
+```
+HDPI essentially tells us that the central 89% of the ways for the model to produce the data place the average height between 159 and 160 cms.
+
+To apply the same logic to multiple data points we use the link function.  Here the link will take from the quap approximation, sample from the posterior distribution and then compute mu (height) for each case in the data and sample from the posterior distribution.  We then use this to plot the distribution of mu for each unique weight value on the horizontal axis.
+
+```{r}
+mu <- link(m4.3)
+str(mu)
+
+#mu[,1]
+
+```
+
+Each row in the output is a sample from the posterior distribution and each column is a row in the data set (352 rows).  THis matrix captures the most probable mu(height) for each row of the sample.
+
+Let us now try to visualize this.  Here we look at values of weight between 25 and 70, and visualize the mu(height) for each of the weights. We use the link function to capture the posterior distribution for each value of weight.
+
+```{r}
+weight.seq <- seq(from=25, to=70, by=1)
+
+mu <- link(m4.3, data = data.frame(weight=weight.seq))
+str(mu)
+
+plot(height ~ weight, d2, type='n')
+for (i in 1:100)
+  points(weight.seq, mu[i,], pch=16, col=col.alpha(rangi2,0.1))
+
+# Summarizing the distribution of mu
+mu.mean <- apply(mu, 2, mean)
+mu.HPDI <- apply(mu, 2, HPDI, prob=0.89)
+
+plot(height ~ weight, data = d2, col= col.alpha(rangi2,0.5))
+#Plotting the MAP lines, the mean mu for each weight
+lines(weight.seq, mu.mean)
+#plot shaded region for 89% HDPI
+shade(mu.HPDI, weight.seq)
+```
+
+In the picture above for each value of weight, a pile of computed mu values are shown.  As we can notice the amount of uncertainity depends on the value of weight.
+
+Receipe for for generating predictions and intervals from the posterior fit of a model.
+1. Use link to generate the posterior values for mu.
+2. Use summary function to identify the mean and HDPI bounds.
+3. use lines and shade to plot the lines.
+
+# Prediction Intervals
+We need to move beyond plotting just the mean of the posterior distribution values, but the height themselves. Here we use sim instead of link.  
+
+The approach is as follows: For every unique weight, we sample the correct mean mu from a gaussian distribution, using the correct sampled value of sigma from he posterior distribution.  If we do this for every sample from the posterior, we get a distribution of heights.  This collection of heights embody the undertainity of the posterior as well as the uncertainity in the gaussian distribution of heights.
+
+```{r}
+sim.height <- sim(m4.3, data = list(weight=weight.seq))
+str(sim.height)
+height.PI <- apply(sim.height, 2, PI, prob=0.89)
+
+# plot raw data 
+plot( height ~ weight , d2 , col=col.alpha(rangi2,0.5) )
+# draw MAP line 
+lines( weight.seq , mu.mean )
+# draw HPDI region for line 
+shade( mu.HPDI , weight.seq )
+# draw PI region for simulated heights 
+shade( height.PI , weight.seq )
+
+
+```

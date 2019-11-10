@@ -1,0 +1,298 @@
+## Loading the libraries and dataset
+
+```{r}
+library(magrittr)
+library(tidybayes)
+library(rethinking)
+data(WaffleDivorce)
+d <- WaffleDivorce
+
+rm(WaffleDivorce)
+detach(package:rethinking, unload = T)
+library(brms)
+library(tidyverse)
+library(ggrepel)
+```
+```{r}
+
+str(d)
+
+```
+
+Plotting waffles houses per million of population and divorce rate
+
+
+```{r}
+
+d %>%
+  ggplot(aes(x=WaffleHouses/Population, y=Divorce)) + 
+    geom_point(size=1.5, color='firebrick4', alpha=1/2) +
+    stat_smooth(method = 'lm', color='firebrick4', fullrange = T, size=1/2, alpha=1/5, fill='firebrick4') +
+    geom_text_repel(
+      data = d %>% filter(Loc %in% c("ME", "OK", "AR", "AL", "GA", "SC", "NJ")),
+      aes(label = Loc),
+      size = 3, seed = 1042) +
+  ylab('Divorce Rate') +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+
+
+```
+
+Standardize the predictor
+
+```{r}
+
+d <- d %>% mutate(MedianAgeMarriage_s=(MedianAgeMarriage - mean(MedianAgeMarriage))/sd(MedianAgeMarriage))
+
+```
+
+Fitting a brms model
+
+```{r}
+b5.1 <- brm(
+  data = d, family = gaussian,
+  formula = Divorce ~ 1 + MedianAgeMarriage_s,
+  prior = c(prior(normal(10,10), class = Intercept),
+            prior(normal(0,1), class = b),
+            prior(uniform(0,10), class = sigma)),
+  iter = 2000, warmup = 500, chains = 4, cores = 4, seed = 5
+)
+
+print(b5.1)
+
+```
+
+Building predictions using the model
+
+```{r}
+# dataset for prediction
+nd <- tibble(MedianAgeMarriage_s=seq(from=-3, to=3.5, length.out = 30))
+
+# using fitted 
+fitted_data <- fitted(b5.1, newdata = nd) %>% as_tibble() %>% bind_cols(nd)
+head(fitted_data)
+head(d)
+
+ggplot(fitted_data, aes(x=MedianAgeMarriage_s, y=Estimate)) +
+  geom_smooth(stat = 'identity', aes(ymin=Q2.5, ymax=Q97.5)) +
+  geom_point(data = d, aes(y=Divorce), shape=1, size=2, color='firebrick4') +
+  theme_bw() + theme(panel.grid = element_blank())
+
+```
+
+A model with mean marraige rate
+
+```{r}
+
+d <- d %>% mutate(Marriage_s=(Marriage-mean(Marriage))/ sd(Marriage))
+
+b5.2 <- brm(
+  data = d, family=gaussian,
+  formula =  Divorce ~ 1 + Marriage_s,
+  prior = c(prior(normal(10,10), class = Intercept),
+            prior(normal(0,0.5), class = b, coef=Marriage_s),
+            prior(normal(0,10), class=sigma)),
+  iter = 41000, warmup = 40000, cores = 4, chains = 4, seed = 5
+)
+
+print(b5.2)
+
+plot(b5.2)
+
+```
+
+Visualization of the results
+```{r}
+
+# Prediction dataframe
+nd <- tibble(Marriage_s=seq(-3,3,length.out = 100))
+
+# fitted data
+fitted_data <- fitted(b5.2, newdata = nd) %>% as_tibble() %>% bind_cols(nd)
+
+# visualization
+d %>%
+  ggplot(aes(x=Marriage_s, y=Divorce)) +
+  geom_smooth(data = fitted_data, aes(y=Estimate, ymin=Q2.5, ymax=Q97.5), 
+              stat='identity', fill = "firebrick", color = "firebrick4", alpha = 1/5, size = 1/4) +
+  geom_point(data = d, aes(y=Divorce), size=2, color='firebrick4') +
+  coord_cartesian(xlim = range(d$Marriage_s),
+  ylim = range(d$Divorce)) +
+  ylab("Divorce") +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+```
+
+Fitting a multivariate model
+
+```{r}
+
+b5.3 <- brm(
+  data = d, family = gaussian,
+  formula = Divorce ~ 1 + Marriage_s + MedianAgeMarriage_s,
+  prior = c(prior(normal(10,10), class = Intercept),
+            prior(normal(0,0.5), class = b, coef=Marriage_s),
+            prior(normal(0,0.5), class = b, coef=MedianAgeMarriage_s),
+            prior(uniform(0,10), class = sigma)),
+  iter = 41000, warmup = 40000, chains = 4, cores = 4, seed = 5
+)
+
+print(b5.3)
+plot(b5.3)
+
+
+```
+Using bayesplot to plot the intervals
+
+```{r}
+
+post <- posterior_samples(b5.3)
+post %>%
+  select(-lp__) %>%
+  gather() %>%
+  group_by(key) %>%
+  ggplot(aes(x=value, y=reorder(key,value))) +
+  stat_pointintervalh(point_interval = mode_hdi, .width = .95,
+  size = 3/4, color = "firebrick4") +
+  labs(title = "My tidybayes-based coefficient plot",
+  x = NULL, y = NULL) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+  panel.grid.major.y = element_line(color = alpha("firebrick4", 1/4), linetype = 3),
+  axis.text.y = element_text(hjust = 0),
+  axis.ticks.y = element_blank())
+
+```
+
+# Handling Categorical variables
+```{r}
+
+library(rethinking)
+data(Howell1)
+d <- Howell1
+
+rm(Howell1)
+detach(package:rethinking, unload = T)
+library(brms)
+```
+
+```{r}
+
+glimpse(d)
+
+```
+
+```{r}
+
+b5.15 <- brm(
+  data = d, family=gaussian,
+  formula = height ~ 1 + male,
+  prior = c(prior(normal(178,10), class = Intercept),
+            prior(normal(0,0.5), class = b),
+            prior(cauchy(0,2), class = sigma)),
+  iter = 2000, warmup = 500, chains = 4, cores = 4, seed = 5
+)
+
+print(b5.15)
+plot(b5.15)
+```
+
+Model based predictions
+```{r}
+
+post <- posterior_samples(b5.15) %>% as_tibble()
+post %>%
+  transmute(male_height=b_Intercept+b_male) %>% mean_qi(.width = .89)
+
+nd <- tibble(male=1)
+fitted(b5.15,
+       newdata = nd,
+       summary = F) %>%
+  as_tibble() %>%
+  ggplot(aes(x = V1, y = 0)) + 
+  geom_halfeyeh(fill = "firebrick4",
+                point_interval = median_qi, .width = .95) +
+  scale_y_continuous(NULL, breaks = NULL) +
+  labs(subtitle = "Model-implied male heights",
+       x = expression(alpha + beta["male"])) +
+  theme_bw() +
+  theme(panel.grid = element_blank())
+
+```
+
+Many more categories
+
+```{r}
+
+library(rethinking)
+data(milk)
+d <- milk
+
+rm(milk)
+detach(package:rethinking, unload = T)
+library(brms)
+
+```
+
+
+```{r}
+
+str(d)
+
+```
+
+```{r}
+
+b5.16 <- brm(
+  data = d, family = gaussian,
+  formula = kcal.per.g ~ 0 + clade,
+  prior = c(prior(normal(0.5,0.5), class = b),
+            prior(cauchy(0,2), class = sigma)),
+  iter = 2000, warmup = 500, chains = 4, cores = 4, seed = 5
+)
+
+print(b5.16)
+plot(b5.16)
+
+```
+
+```{r}
+
+posterior_samples(b5.16, summary=F) %>% select(-lp__)
+
+```
+
+Adding another predictor variable
+
+```{r}
+
+unique(d$clade)
+
+b5.17 <- brm(
+  data = d, family = gaussian,
+  formula = kcal.per.g ~ 0 + clade + perc.fat,
+  prior = c(
+            prior(normal(0,.5), class = b),
+            prior(normal(0,0.5), class = b, coef=perc.fat),
+            prior(cauchy(0,2), class = sigma)),
+  iter = 2000, warmup = 500, chains = 4, cores = 4, seed = 5
+)
+
+print(b5.17)
+plot(b5.17)
+
+```
+
+```{r}
+
+nd <- tibble(
+  clade=c('Strepsirrhine'),
+  perc.fat=c(0.5)
+)
+
+posterior_summary(b5.17)
+fitted(b5.17, newdata = nd)
+predict(b5.17, newdata = nd)
+
+```

@@ -1,0 +1,261 @@
+---
+title: "Chapter 04"
+author: "Srivatsa Srinath"
+date: "10/04/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE)
+library(dplyr);
+library(tidyr);
+library(rstan);
+library(ggplot2);
+library(ggthemes);
+library(rethinking);
+library(HDInterval)
+library(gridExtra)
+
+theme_set(theme_tufte(base_family = 'sans'))
+
+```
+
+# Chapter 4
+
+## 4.3 A gaussian model fo height
+
+```{r read_data}
+
+data("Howell1", package = 'rethinking')
+d <- Howell1; rm(Howell1)
+
+d2 <- d %>% filter(age>=18)
+
+```
+
+## 4.3.2 The model
+
+```{stan output.var="m04_1"}
+
+data {
+  int<lower=1> N;
+  vector[N] height;
+}
+parameters {
+  real mu;
+  real<lower=0, upper=50> sigma;
+}
+model {
+  target += normal_lpdf(height | mu, sigma);
+  target += normal_lpdf(mu | 178, 20);
+}
+
+```
+
+Re-organizing the input in a list format as needed by stan
+
+```{r}
+
+dat <- list(N = nrow(d2), height=d2$height)
+
+```
+
+Sampling from the model
+
+```{r}
+fit_04_1 <- sampling(m04_1, data = dat, iter = 1000, chains = 4, cores = 4)
+
+```
+
+```{r}
+
+print(fit_04_1, probs = c(0.1, 0.9))
+
+```
+
+Effect of a narrower prior
+
+```{stan output.var="m04_2"}
+
+data {
+  int<lower=1> N;
+  vector[N] height;
+}
+parameters {
+  real mu;
+  real<lower=0,upper=50> sigma;
+}
+model {
+  target += normal_lpdf(height | mu, sigma);
+  target += normal_lpdf(mu | 178, 0.1);
+}
+
+```
+
+```{r}
+
+dat <- list(N = nrow(d2), height=d2$height)
+
+fit_04_2 <- sampling(m04_2, data = dat, iter = 1000, chains = 4, cores = 4)
+```
+
+```{r}
+
+as.data.frame(fit_04_2) %>% select(mu, sigma) %>% cor()
+
+as.data.frame(fit_04_2) %>% select(mu, sigma) %>% summarise_all(mean)
+
+```
+
+Adding a predictor variable; weight
+
+```{stan, output.var="m04_3"}
+
+data {
+  int<lower=0> N;
+  vector[N] height;
+  vector[N] weight;
+}
+parameters {
+  real alpha;
+  real beta;
+  real<lower=0, upper=50> sigma;
+}
+model {
+  vector[N] mu = alpha + beta*weight;
+  height ~ normal(mu, sigma);
+  alpha ~ normal(178,20);
+  beta ~ normal(0,10);
+  //target += normal_lpdf(height|mu, sigma);
+  //target += normal_lpdf(mu|178,20);
+  //target += normal_lpdf(beta|0,10);
+  
+
+}
+```
+
+
+```{stan, output.var="m04_4"}
+
+data {
+  int <lower=0> N;
+  vector[N] weight;
+  vector[N] height;
+}
+parameters {
+  real alpha;
+  real beta;
+  real<lower=0> sigma;
+}
+model {
+  vector[N] mu = alpha+beta*weight;
+  height ~ normal(mu, sigma);
+}
+```
+
+
+```{r}
+
+
+dat <- list(N = nrow(d2), height=d2$height, weight=d2$weight)
+
+fit_04_3 <- sampling(m04_3, data = dat, iter = 1000, chains = 4, cores = 4)
+
+```
+
+Plotting the posterior inference along the original data
+
+```{r}
+post <- as.data.frame(fit_04_3)
+
+ggplot(d2, aes(x=weight, y=height)) + 
+  geom_point(shape=1, color='dodgerblue') +
+  geom_abline(intercept = mean(post$alpha), slope = mean(post$beta))
+
+```
+
+Consider height at weight of 50 only
+
+```{r}
+mu_at_50 <- post$alpha + post$beta*50
+
+ggplot() + geom_density(aes(x=mu_at_50), fill='lightskyblue1') +
+  labs(x='mu| weight=50')
+
+```
+
+Computing the credible intervals @80
+
+```{r}
+HDInterval::hdi(mu_at_50, credMass=0.8)[1:2]
+
+```
+
+Plotting the density at each weight
+
+```{r}
+
+f_mu <- function(x) post$alpha + post$beta*x;
+weight_new <- seq(25, 75)
+mu <- sapply(weight_new, f_mu) %>%
+        as_tibble() %>%
+        rename_all(function(x) weight_new) %>%
+        mutate(Iter=row_number()) %>%
+        gather(weight, height, -Iter) %>%
+        group_by(weight) %>%
+        mutate(hpdi_l=HDInterval::hdi(height, credMass = 0.8)[1],
+               hpdi_r=HDInterval::hdi(height, credMass = 0.8)[2],
+               mu=mean(height)) %>%
+        mutate(mu=mean(height)) %>%
+        ungroup() %>%
+        mutate(weight=as.integer(weight))
+mu
+
+```
+
+
+```{r, fig.width=12}
+p1 <- ggplot() + geom_point(data=mu%>%filter(Iter<150), aes(x=weight, y=height), alpha=0.05)
+p2 <- ggplot() + geom_point(data=d2, aes(x=weight, y=height), shape=1, color='dodgerblue') +
+        geom_ribbon(data=mu, aes(x=weight, ymin=hpdi_l, ymax=hpdi_r), alpha=0.1) +
+        geom_abline(data=post, intercept = mean(alpha), slope = mean(beta))
+p3 <- ggplot() + geom_point(data=mu, aes(x=weight, y=height), alpha=0.05)
+grid.arrange(p1, p2, p3, nrow=1)  
+```
+
+
+Prediction Intervals
+
+```{r}
+
+sim_ht <- sapply(weight_new, function(x) rnorm(nrow(post), post$alpha+post$beta*x, post$sigma)) %>% 
+            as_tibble() %>%
+            rename_all(function(x) weight_new) %>%
+            mutate(Iter=row_number()) %>%
+            gather(weight, height, -Iter) %>%
+            group_by(weight) %>%
+            mutate(pi_l=PI(height, prob = 0.8)[1],
+                   pi_r=PI(height, prob = 0.8)[2]) %>%
+            ungroup() %>%
+            mutate(weight=as.integer(weight))
+  
+sim_ht
+
+```
+
+```{r, fig.width=12}
+p1 <- ggplot() + geom_point(data=mu%>%filter(Iter<150), aes(x=weight, y=height), alpha=0.05) +
+        labs(subtitle = 'Density at each weight')
+p2 <- ggplot() + geom_point(data=d2, aes(x=weight, y=height), shape=1, color='dodgerblue') +
+        geom_ribbon(data=sim_ht, aes(x=weight, ymin=pi_l, ymax=pi_r), alpha=0.1) +
+        geom_abline(data=post, intercept = mean(alpha), slope = mean(beta)) +
+        labs(subtitle = 'Prediction Intervals at 0.95')
+p3 <- ggplot() + geom_point(data=d2, aes(x=weight, y=height), shape=1, color='dodgerblue') +
+        geom_ribbon(data=mu, aes(x=weight, ymin=hpdi_l, ymax=hpdi_r), alpha=0.1) +
+        geom_abline(data=post, intercept = mean(alpha), slope = mean(beta)) +
+        labs(subtitle = 'HPDI Intervals at 0.95')
+grid.arrange(p1, p2, p3, nrow=1)  
+
+```
+

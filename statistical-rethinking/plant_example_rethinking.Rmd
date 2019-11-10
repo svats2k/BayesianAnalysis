@@ -1,0 +1,156 @@
+Digging deeper into the plant treatment example
+
+Setting up the libraries
+```{r}
+
+require(loo)
+require(rethinking)
+require(tidyr)
+require(tidyverse)
+require(dplyr)
+require(ggplot2)
+require(tidyr)
+require(tidybayes)
+require(bayesplot)
+require(brms)
+require(broom)
+
+source("init_stan_settings.R")
+```
+
+Generating the dataset
+```{r}
+
+set.seed(71)
+# number of plants
+ N <- 100
+# simulate initial heights
+h0 <- rnorm(N, 10, 2)
+# assign treatments and simulate fungus and growth
+treatment <- rep(0:1, each = N / 2)
+fungus <- rbinom(N, size = 1, prob = 0.5 - treatment * 0.4)
+h1 <- h0 + rnorm(N, 5 - 3 * fungus)
+# compose a clean data frame
+d <- data.frame(h0 = h0, h1 = h1, treatment = treatment, fungus = fungus)
+
+
+```
+
+Understanding the dataset
+```{r}
+
+d %>%
+  mutate(treatment = as.factor(treatment),
+         fungus = as.factor(fungus)) %>%
+  gather(stages, height, -treatment, -fungus) %>%
+  ggplot(aes(x = stages, y = height, col = treatment)) + geom_boxplot() + facet_wrap(.~fungus)
+
+```
+
+What can we observe?
+* Plants that have the fungus have lesser growth than the plants that dont.
+* In the plants that have the fungus, there does seem to be an impact of the treatment.
+
+Modeling with rethinking package
+```{r}
+# Not considering fungus and treatment
+mr6.6 <- ulam(
+  alist(
+    h1 ~ dnorm(mu, sigma),
+    mu <- h0 * p,
+    p ~ dlnorm(0, 0.25),
+    sigma ~ dexp(1)
+  ), data = d, chains = 4, cores = 4
+)
+
+# Considering the impact of fungus and treatment
+mr6.7 <- ulam(
+  alist(
+    h1 ~ dnorm(mu, sigma),
+    mu <- h0 * p,
+    p <- a + b_T * treatment + b_F * fungus,
+    a ~ dlnorm(0, 0.25),
+    b_T ~ dnorm(0, 0.5),
+    b_F ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d, chains = 4, cores = 4
+)
+
+# Considering the impact of treatment alone
+mr6.8 <- ulam(
+  alist(
+    h1 ~ dnorm(mu, sigma),
+    mu <- h0 * p,
+    p <- a + b_T * treatment,
+    a ~ dlnorm(0, 0.25),
+    b_T ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d, chains = 4, cores = 4
+)
+
+```
+
+Prior simulation on each of the 3 models
+```{r}
+prior_s6.6 <- extract.prior(mr6.6)
+post_s6.6 <- extract.samples(mr6.6)
+
+prior_s6.7 <- extract.prior(mr6.7)
+post_s6.7 <- extract.samples(mr6.7)
+
+prior_s6.8 <- extract.prior(mr6.8)
+post_s6.8 <- extract.samples(mr6.8)
+
+```
+
+```{r}
+
+length(prior_s6.6$p)
+length(prior_s6.6$sigma)
+
+
+precis(mr6.6)
+precis(mr6.7)
+precis(mr6.8)
+```
+
+Considering the first model mr6.6
+
+The log-pointwise-predictive-density is the total across observations of the logarithm of the average likelihood of each observation.
+
+lppd computations
+```{r}
+
+sum(lppd(mr6.6))
+sum(lppd(mr6.7))
+sum(lppd(mr6.8))
+
+```
+
+
+
+```{r}
+
+preds <- sapply(d$h0, function(h0) {
+  post_s6.6$p * h0
+})
+
+ll <- sapply(seq_len(ncol(preds)), function(x) {
+  dnorm(x = d$h1[x], mean = post_s6.6$p * d$h0[x], sd = post_s6.6$sigma, log = T)
+})
+
+dnorm(x = d$h1[1], mean = post_s6.6$p * d$h0[1], sd = post_s6.6$sigma, log = T)[1:3]
+
+dnorm(x = d$h1[1], mean = post_s6.6$p[1] * d$h0[1], sd = post_s6.6$sigma[1], log = T)
+dnorm(x = d$h1[1], mean = post_s6.6$p[2] * d$h0[1], sd = post_s6.6$sigma[2], log = T)
+
+ll %>%
+  exp() %>%
+  colMeans()
+
+lppd(mr6.6)
+
+
+dim(ll)
+```
+

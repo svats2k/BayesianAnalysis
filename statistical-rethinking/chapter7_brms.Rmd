@@ -1,0 +1,281 @@
+```{r load_packages}
+require(loo)
+require(rethinking)
+require(tidyr)
+require(tidyverse)
+require(dplyr)
+require(ggplot2)
+require(tidyr)
+require(tidybayes)
+require(bayesplot)
+require(brms)
+require(broom)
+
+options(mc.cores = parallel::detectCores())
+```
+
+3 gaussian prior
+
+```{r}
+
+n_samples <- 1e5
+
+tibble(
+  d = seq(from = -3, to = 3, length.out = 1e4),
+  sig_1 = dnorm(x = d, mean = 0, sd = 1),
+  sig_0p5 = dnorm(x = d, mean = 0, sd = 0.5),
+  sig_0p2 = dnorm(x = d, mean = 0, sd = 0.2),
+) %>%
+  gather(prior_type, values, -d) %>%
+  ggplot(aes(x = d, y = values, col = prior_type)) +
+    geom_line(stat = "identity")
+
+tibble(
+  sig_1 = rnorm(n = n_samples, mean = 0, sd = 1),
+  sig_0p5 = rnorm(n = n_samples, mean = 0, sd = 0.5),
+  sig_0p2 = rnorm(n = n_samples, mean = 0, sd = 0.2),
+) %>%
+  gather(prior_type, values) %>%
+  ggplot(aes(x = values, col = prior_type)) + geom_density()
+
+```
+
+
+Computing WAIC
+```{r}
+data(cars)
+
+priors <- c(brms::prior(normal(0, 100), class = Intercept),
+            brms::prior(normal(0, 10), class = b),
+            brms::prior(cauchy(0, 2), class = sigma))
+
+m <- brm(data = cars, family = gaussian,
+         formula = dist ~ 1 + speed,
+         prior = priors,
+         sample_prior = T, iter = 2000, warmup = 500,
+         cores = 4, chains = 4)
+
+```
+
+Stan diagnostics
+
+```{r}
+
+mcmc_dens(m)
+mcmc_trace(m)
+
+```
+
+Extracting the prior and posterior sample
+
+```{r}
+
+post_s <- posterior_samples(m)
+prior_s <- prior_samples(m)
+
+speed_seq <- seq(from = min(cars$speed),
+                 to = max(cars$speed),
+                 length.out = nrow(cars))
+
+mu_preds <- sapply(speed_seq,
+                   function(x) post_s$b_Intercept + post_s$b_speed * x)
+
+dist_preds <- sapply(speed_seq,
+                     function(x) rnorm(n = 1e4,
+                                       mean = post_s$b_Intercept + post_s$b_speed * x,
+                                       sd = post_s$sigma))
+
+dist_vals <- sapply(seq_len(ncol(dist_preds)),
+                    function(s) {
+                      rethinking::PI(dist_preds[, s])
+                    }) %>%
+              t %>%
+              as_tibble() %>%
+              mutate(speed = speed_seq) %>%
+              cbind(colMeans(dist_preds)) %>%
+              rename(dist_mean = "colMeans(dist_preds)",
+                     dist_ll = "5%",
+                     dist_ul = "94%")
+
+mu_vals <- sapply(seq_len(ncol(mu_preds)),
+                  function(s) {
+                    rethinking::PI(mu_preds[, s])
+                  }
+            ) %>%
+            t %>%
+            as_tibble() %>%
+            mutate(speed = speed_seq) %>%
+            cbind(colMeans(mu_preds)) %>%
+            cbind(cars$dist) %>%
+            rename(dist = "cars$dist",
+                   mu_mean = "colMeans(mu_preds)",
+                   mu_ll = "5%",
+                   mu_ul = "94%")
+
+mu_vals %>%
+  ggplot(aes(x = speed)) +
+    geom_ribbon(data = dist_vals,
+                aes(x = speed, ymin = dist_ll, ymax = dist_ul),
+                fill = "grey83") +
+    geom_smooth(data = mu_vals,
+                aes(y = mu_mean, ymin = mu_ll, ymax = mu_ul),
+                fill = "grey70",
+                stat = "identity") +
+    geom_point(aes(y = dist))
+
+```
+
+Log likelihood computation
+
+In BRMS, Each occasion / data point gets a column and each HMC chain iteration gets a row.
+```{r}
+
+f_ll <- log_lik((m))
+
+c_ll <- sapply(seq_len(nrow(post_s)), function(s_idx) {
+  mu <- post_s$b_Intercept[s_idx] + post_s$b_speed[s_idx] * cars$speed
+  dnorm(x = cars$dist, mean = mu, sd = post_s$sigma[s_idx], log = T)
+}) %>% t
+
+sum(f_ll - c_ll)
+
+```
+
+
+Deviance measurement
+
+```{r}
+
+f_ll %>%
+  as_tibble() %>%
+  mutate(sums = rowSums(.),
+         deviance =  -2 * sums) %>%
+  ggplot() +
+    geom_density(aes(x = deviance)) +
+    labs(title = "Deviance Distribution")
+```
+
+The log-pointwise-predictive-density is the total across observations of the logarithm of the average likelihood of each observation.
+For pWAIC compute the variance in log-probabilities for each observation i, and then sum up these variances to get the total penalty.
+
+```{r}
+
+ll <- m %>%
+      log_lik() %>%
+      as_tibble()
+
+df_means <- ll %>%
+              exp() %>%
+              summarise_all(mean) %>%
+              gather(key, means) %>%
+              select(means)
+
+df_vars <- ll %>%
+              summarise_all(var) %>%
+              gather(key, vars) %>%
+              select(vars)
+
+avg_ll_p <- df_means %>% log %>% sum
+avg_ll_p
+p_waic <- df_vars %>% sum
+p_waic
+
+waic <- -2 * (avg_ll_p - p_waic)
+waic
+
+waic(m)
+```
+
+Plant - Fungus Model from previous chapter
+
+Generating the dataset
+```{r}
+
+set.seed(71)
+# number of plants
+ N <- 100
+# simulate initial heights
+h0 <- rnorm(N, 10, 2)
+# assign treatments and simulate fungus and growth
+treatment <- rep(0:1, each = N / 2)
+fungus <- rbinom(N, size = 1, prob = 0.5 - treatment * 0.4)
+h1 <- h0 + rnorm(N, 5 - 3 * fungus)
+# compose a clean data frame
+d <- data.frame(h0 = h0, h1 = h1, treatment = treatment, fungus = fungus)
+
+```
+
+Simple model build
+
+Key careabouts:
+
+Simulating a log normal distribution which is always positive.
+```{r}
+
+n_samples <- 1e4
+ml <- c(0, 1, 2, 3)
+sdl <- c(1, 1, 1, 1)
+
+for (i in seq_len(length(ml))) {
+  sim_p <- rlnorm(n = n_samples, meanlog = ml[i], sdlog = sdl[i])
+  print(paste0("min: ", min(sim_p)))
+  print(paste0("max: ", max(sim_p)))
+  print(paste0("exp: ", exp(ml[i])))
+  print(summary(sim_p))
+  print("\n")
+}
+```
+
+Plant and fungus exercises
+
+```{r}
+
+m6.6 <- ulam(
+  alist(
+    h1 ~ dnorm(mu, sigma),
+    mu <- h0 * p,
+    p ~ dlnorm(0, 0.25),
+    sigma ~ dexp(1)
+  ), data = d, chains = 4, cores = 4
+)
+
+m6.7 <- ulam(
+  alist(
+    h1 ~ dnorm(mu, sigma),
+    mu <- h0 * p,
+    p <- a + b_T * treatment + b_F * fungus,
+    a ~ dlnorm(0, 0.25),
+    b_T ~ dnorm(0, 0.5),
+    b_F ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d, chains = 4, cores = 4
+)
+
+m6.8 <- ulam(
+  alist(
+    h1 ~ dnorm(mu, sigma),
+    mu <- h0 * p,
+    p <- a + b_T * treatment,
+    a ~ dlnorm(0, 0.25),
+    b_T ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d, chains = 4, cores = 4
+)
+
+```
+
+Building the above model in brms
+
+```{r}
+
+priors <- c(brms::prior(normal(0, 1000), class=Intercept),
+            brms::prior(normal(0,1000), class=b),
+            brms::prior(cauchy(0,10), class=sigma))
+
+bm6.6 <- brm(family = gaussian, data = d,
+             prior = priors,
+             formula = h1 ~ h0 * p)
+
+
+```
+

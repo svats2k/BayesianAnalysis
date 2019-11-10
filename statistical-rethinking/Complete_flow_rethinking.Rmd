@@ -1,0 +1,103 @@
+Reading the libraries
+```{r}
+
+require(tidyr)
+require(dplyr)
+require(ggplot2)
+require(rethinking)
+require(bayesplot)
+
+```
+
+Reading in the data
+
+```{r}
+
+data(Howell1)
+d <- Howell1
+rm(Howell1)
+
+d <- d %>% mutate(gen_categ=as.factor(male + 1))
+d2 <- d[d$age > 18,]
+d2$weight_cc <- scale(d2$weight)
+
+head(d2)
+```
+
+```{r}
+
+m1 <- ulam(
+    alist(
+      height ~ dnorm(mu, sigma),
+      mu ~ dnorm(178, 20),
+      sigma ~ dexp(1)
+    ), data = d2, chains = 4, cores = 4
+  )
+
+precis(m1, depth = 2)
+
+m2 <- ulam(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- alpha + beta * weight_cc,
+    alpha ~ dnorm(0,10),
+    beta ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d2, chains = 4, cores = 4
+)
+
+precis(m2, depth = 2)
+
+m3 <- ulam(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a[gen_categ] + beta * weight_cc,
+    a[gen_categ] ~ dnorm(0,10),
+    beta ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data = d2, cores = 4, chains = 4
+)
+
+precis(m3)
+
+```
+
+Extracting samples from the posterior
+```{r}
+
+prior <- extract_prior_ulam(m1)
+post <- extract.samples(m1)
+```
+
+```{r}
+
+dim(post)
+
+```
+
+Visualizing the chains
+```{r}
+
+
+mcmc_dens(m1)
+
+```
+
+Prior Predictive simulations
+
+```{r}
+
+
+```
+
+Posterior predictive simulations
+
+```{r}
+
+
+```
+
+
+
+
+

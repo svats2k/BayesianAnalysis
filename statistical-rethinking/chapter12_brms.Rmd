@@ -1,0 +1,149 @@
+### Working on tadpoles dataset
+
+```{r}
+library(ggplot2)
+library(ggthemes)
+library(tidyverse)
+library(tidybayes)
+library(purrr)
+library(rethinking)
+
+data(reedfrogs)
+d <- reedfrogs
+
+rm(reedfrogs)
+detach(package:rethinking, unload = T)
+library(brms)
+
+# Making tank the cluster variable
+d <- d %>% mutate(tank=1:nrow(d)) %>% as_tibble()
+head(d)
+```
+
+### Simple fixed effects model
+
+Each tank has its own survival probability, there is no adaptive pooling of information across the clusters
+
+```{r}
+d$tank <- as.factor(d$tank)
+
+b12.1 <- brm( data = d, family = 'binomial',
+              surv | trials(density) ~ 0 + tank,
+              prior = c(prior(normal(0,5), class=b)),
+              iter = 2000, warmup = 500, chains = 4, cores = 4, seed = 12)
+
+summary(b12.1)
+# plot(b12.1)
+```
+
+Drawing posterior samples
+
+```{r}
+post <- posterior_samples(b12.1)
+post %>%
+  select(-lp__) %>%
+  gather() %>%
+  group_by(key) %>%
+  ggplot(aes(x=value, y=reorder(key,value))) +
+  stat_pointintervalh(point_interval = mode_hdi, .width = .95,
+  size = 3/4, color = "firebrick4") +
+  labs(title = "Tadpole survival rate",
+  x = NULL, y = NULL) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+  panel.grid.major.y = element_line(color = alpha("firebrick4", 1/4), linetype = 3),
+  axis.text.y = element_text(hjust = 0),
+  axis.ticks.y = element_blank())
+```
+
+What does the shrinkage look like the fixed effects based model
+```{r}
+post_mdn_fx <-
+  fixef(b12.1) %>%
+  as_tibble() %>%
+  select(Estimate) %>%
+  bind_cols(d) %>%
+  mutate(post_mdn = inv_logit_scaled(Estimate))
+
+post_mdn_fx %>%
+  ggplot(aes(x = as.integer(tank))) +
+  # geom_hline(yintercept = median(post_mdn)), linetype = 2, size = 1/4) +
+  geom_vline(xintercept = c(16.5, 32.5), size = 1/4) +
+  geom_point(aes(y = propsurv), color = "orange2") +
+  geom_point(aes(y = post_mdn), shape = 1) +
+  coord_cartesian(ylim = c(0, 1)) +
+  scale_x_continuous(breaks = c(1, 16, 32, 48)) +
+  labs(
+    title = "Multilevel shrinkage!",
+    subtitle = "The empirical proportions are in orange while the model-\nimplied proportions are the black") + 
+  annotate("text", x = c(8, 16 + 8, 32 + 8), y = 0,
+  label = c("small tanks", "medium tanks", "large tanks")) +
+  theme_fivethirtyeight() +
+  theme(panel.grid = element_blank())
+
+```
+
+### Simple multi-level model
+
+Adaptively pooling information across all tanks
+
+```{r}
+
+b12.2 <- brm( data = d, family = 'binomial',
+              surv | trials(density) ~ 1 + (1|tank),
+              prior = c(prior(normal(0,5), class=Intercept),
+                        prior(cauchy(0,1), class=sd)),
+              iter = 2000, warmup = 500, chains = 4, cores = 4, seed = 12)
+
+summary(b12.2)
+```
+
+Simulting the information learned and observing shrinkage
+
+```{r}
+
+post <- posterior_samples(b12.2, add_chain = T)
+post_mdn <- coef(b12.2, robust=T)$tank[, ,] %>% 
+              as_tibble() %>% 
+              bind_cols(d) %>% 
+              mutate(post_mdn=inv_logit_scaled(Estimate)) %>%
+              bind_cols(post_mdn_fx)
+
+post_mdn
+
+post_mdn %>%
+  ggplot(aes(x=as.integer(tank))) +
+  geom_hline(yintercept = inv_logit_scaled(median(post$b_Intercept)), linetype=2, size=1/4) +
+  geom_vline(xintercept = c(16.5, 32.5), size=1/4) +
+  geom_point(aes(y=propsurv), color='orange2') +
+  geom_point(aes(y=post_mdn1), color='royalblue') +
+  geom_point(aes(y=post_mdn), shape=1) +
+  coord_cartesian(ylim = c(0,1)) +
+  scale_x_continuous(breaks=c(1,16,32,48)) +
+  labs(title='Multilevel Shrinkage!',
+       subtitle = 'The empirical proportions are in orange while the model-\nimplied proportions are the black circles. The dashed line is\nthe model-implied average survival proportion.\nOpenCircle - randef\nBlue - fixef\nOrange - data\n') +
+  theme_fivethirtyeight() +
+  theme(panel.grid = element_blank())
+
+```
+
+```{r}
+
+set.seed(12)
+
+ggplot(data = post, 
+       aes(x = rnorm(n    = nrow(post), 
+                     mean = b_Intercept, 
+                     sd   = sd_tank__Intercept) %>% 
+             inv_logit_scaled())) +
+  geom_density(size = 0, fill = "orange2") +
+  scale_y_continuous(NULL, breaks = NULL) +
+  ggtitle("Probability of survival") +
+  theme_fivethirtyeight()
+
+```
+
+```{r}
+
+```
+

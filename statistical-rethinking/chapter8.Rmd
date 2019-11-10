@@ -1,0 +1,93 @@
+*Conditioning* is one of the most important features in statistical inference. In the examples on manatees and the bombers, the evidence from those that survive is misleading as they are the scars on the condition that they survive.
+
+* Data are conditional on how they got into the sample.
+* Posterior distributions are conditional on the data.
+* All model based inference ixs conditional on the data.
+In summary, every inference is conditional on something, whether we notice it or not.
+
+In the linear models, so far, we have assumed the mean of the target variable to have an independent association with each of the predictor.  If we wanted to allow association, then linear models cannot help us.  To model conditionality, we need *interaction*.
+
+# Building interactions
+*Problem statement:* Bad geography tends to be related to bad economy, but african economies tend to benefit from bad geographies.
+
+## data prep
+```{r}
+library(rethinking)
+data(rugged)
+d <- rugged
+
+# making a log version of the output
+d$log_gdp <- log(d$rgdppc_2000)
+
+# Extract countries with GDP data
+dd <- d[complete.cases(d$rgdppc_2000),]
+
+# rescaling the variables
+dd$log_gdp_std <- dd$log_gdp/mean(dd$log_gdp)
+dd$rugged_std <- dd$rugged/max(dd$rugged)
+
+# Splitting countries into Africa and not Africa
+d.A1 <- dd[dd$cont_africa==1, ] # Africa
+d.A0 <- dd[dd$cont_africa==0, ] # not Africa
+```
+
+## Building separate linear models
+
+```{r}
+
+mA0 <- quap(
+  alist(
+    log_gdp_std ~ dnorm(mu, sigma),
+    mu <- a + b*rugged_std,
+    a ~ dnorm(0,0.5),
+    b ~ dnorm(0,0.2),
+    sigma ~ dexp(1)
+  ), data = d.A0
+)
+
+rug_seq <- seq(from=0, to=1, length.out = 100)
+mu_GDP_A0 <- link(mA0, data = data.frame(rugged_std=rug_seq))
+mu_GDP_A0_mean <- apply(mu_GDP_A0, 2, mean)
+mu_GDP_A0_PI <- apply(mu_GDP_A0, 2, PI)
+
+mA1 <- quap(
+  alist(
+    log_gdp_std ~ dnorm(mu, sigma),
+    mu <- a + b*rugged_std,
+    a ~ dnorm(0,0.5),
+    b ~ dnorm(0,0.2),
+    sigma ~ dexp(1)
+  ), data = d.A1
+)
+
+rug_seq <- seq(from=0, to=1, length.out = 100)
+mu_GDP_A1 <- link(mA1, data = data.frame(rugged_std=rug_seq))
+mu_GDP_A1_mean <- apply(mu_GDP_A1, 2, mean)
+mu_GDP_A1_PI <- apply(mu_GDP_A1, 2, PI)
+
+par(mfrow=c(1,2))
+
+
+plot(log_gdp_std ~ rugged_std, data=d.A0, col=rangi2,
+     xlab='ruggedness standardized',
+     ylab='log GDP (as proportion of mean)')
+lines(rug_seq, mu_GDP_A0_mean)
+shade(mu_GDP_A0_PI, rug_seq)
+mtext('Non-African nations')
+
+plot(log_gdp_std ~ rugged_std, data=d.A1, col=rangi2,
+     xlab='ruggedness standardized',
+     ylab='log GDP (as proportion of mean)')
+lines(rug_seq, mu_GDP_A1_mean)
+shade(mu_GDP_A1_PI, rug_seq)
+mtext('African nations')
+
+```
+
+## Prior predictive distributions
+
+```{r}
+
+
+```
+

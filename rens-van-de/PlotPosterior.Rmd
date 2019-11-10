@@ -1,0 +1,406 @@
+# The data
+Plotting the height versus the weight in Howell data
+
+## Setting it up
+```{r}
+library(rethinking)
+data("Howell1")
+d<- Howell1
+```
+
+## Scaling the variables
+
+```{r}
+
+d2 <- d[d$age > 18,]
+
+mH <- quap(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu ~ dnorm(178, 20),
+    sigma ~ dunif(0,50)
+  ), data = d2
+)
+
+precis(mH)
+
+```
+
+# Post modelling checks
+
+## Extracting samples from the posterior
+
+```{r}
+
+post <- extract.samples(mH, n = 1e4)
+str(post)
+
+```
+
+# Building a Linear Model
+
+## Modeling the prior predictive distributions
+
+```{r}
+
+N <- 100
+a <- rnorm(N, 178, 20)
+b <- rlnorm(N, 0, 1)
+
+plot(NULL, xlim=range(d2$weight), ylim=range(-100,400), xlab = 'weight', ylab = 'height')
+
+abline(h=0, lty=2)
+abline(h=272, lty=2)
+
+for (i in 1:N)
+  curve(a[i] + b[i]*(x - mean(d2$weight)),
+        from = min(d2$weight),
+        to = max(d2$weight), add=TRUE,
+        col=col.alpha('black', 0.2))
+```
+
+
+## Modeling height with weight
+
+```{r}
+xbar <- mean(d2$weight)
+
+mH.lm <- quap(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a + b*(weight - xbar),
+    a <- dnorm(178, 20),
+    b ~ dlnorm(0,1),
+    sigma ~ dunif(0,50)
+  ), data = d2
+)
+
+precis(mH.lm)
+```
+
+## Plotting the most plausible lines implied by the above fit
+```{r}
+post <- extract.samples(mH.lm)
+str(post)
+
+a_map <- mean(post$a)
+b_map <- mean(post$b)
+
+plot(d2$height ~ d2$weight, col=rangi2)
+for (i in 1:length(post$a))
+  curve(post$a[i] + post$b[i]*(x-mean(d2$weight)), col=col.alpha("black",0.3), add=TRUE)
+```
+
+## Finding the mu interval for a given value of weight
+```{r}
+
+# extract samples from the posterior
+post <- extract.samples(mH.lm)
+
+mu_at_50 <- post$a + post$b*(50-mean(d2$weight))
+
+dens(mu_at_50, show.HPDI = TRUE, lwd=2, col=rangi2)
+```
+
+## using the link function
+We would like to generate the mu values for a specific range of values using the link function.  Link computes the mu for each sample in the posterior and for each weight in weight.seq.
+```{r}
+
+weight.seq <- seq(from=25, to=70, by=1)
+mu <- link(mH.lm, data = data.frame(weight=weight.seq))
+# finding mean & PI of mu
+mu.mean <- apply(mu, 2 , mean)
+mu.PI <- apply(mu, 2, PI)
+mu.HPDI <- apply(mu, 2, HPDI, 0.89)
+
+par(mfrow=c(1,2))
+plot(height ~ weight, data=d2, col=rangi2)
+# Looping and plotting the mu for each of the weight values
+for (i in 1:length(weight.seq))
+  points(weight.seq, mu[i,])
+
+plot(height ~ weight, data=d2, col=rangi2)
+lines(weight.seq, mu.mean)
+shade(mu.HPDI, weight.seq)
+```
+## Simulating the heiht rather than the mean from the posterior distribution
+
+```{r}
+sim.height <- sim(mH.lm, data=data.frame(weight=weight.seq))
+str(sim.height)
+
+height.PI <- apply(sim.height, 2, PI, prob=0.89)
+
+# raw data
+plot(height ~ weight, data=d2, col=rangi2)
+
+# MAP line
+lines(weight.seq, mu.mean)
+
+# HPDI region for mean
+shade(mu.HPDI, weight.seq)
+
+# PI region for simulated heights
+shade(height.PI, weight.seq)
+
+```
+
+# Multivariate Bayesian Regression
+
+##Loading the data
+```{r}
+data("WaffleDivorce")
+dWD <- WaffleDivorce
+
+#standardize the variables
+dWD$A <- scale(dWD$MedianAgeMarriage)
+dWD$D <- scale(dWD$Divorce)
+dWD$M <- scale(dWD$Marriage)
+
+```
+
+## Model Building
+Here we are trying to model the total association between age of marriage and divorce rate.  It could so happen that
+divorce rate is imapct directly by age and through a *mediation* path with marriage rate.
+
+```{r}
+
+mA <- quap(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bA*A,
+    a ~ dnorm(0,0.2),
+    bA ~ dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data = dWD
+)
+
+mM <- quap(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bM*M,
+    a ~ dnorm(0,0.2),
+    bM ~ dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data = dWD
+)
+
+mAM <- quap(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bA*A + bM*M,
+    a <- dnorm(0,0.2),
+    bA <- dnorm(0,0.5),
+    bM <- dnorm(0,0.5),
+    sigma <- dexp(1)
+  ), data = dWD
+)
+
+# plot(coeftab(mA, mM, mAM))
+
+precis(mA)
+precis(mM)
+precis(mAM)
+
+```
+
+## Simulating the prior distribution
+```{r}
+prior <- extract.prior(mA)
+A_seq <- seq(-2, 2, length.out = 100)
+mu <- link(mA, post=prior, data=data.frame(A=A_seq))
+str(mu)
+plot(NULL, xlim=range(A_seq), ylim=c(-2,2),
+     xlab='Median Marriage Age(std)',
+     ylab='Divorce Rate (std)')
+for (i in 1:50)
+  lines(A_seq, mu[i,], col=col.alpha('black',0.3) )
+
+```
+
+## Posterior Residual Plots
+
+A predictor variable residual is the average perdiction error when we use all of the other predictor variables to model a predictor of interest.
+
+### Residual plot for Marraige Rate
+Here we need to build a model, which is the regression between divorce rate and Median age (mA)
+
+```{r}
+
+mAr <- quap(
+  alist(
+    M ~ dnorm(mu, sigma),
+    mu <- a + bMA * A,
+    bMA ~ dnorm(0,0.5),
+    a ~ dnorm(0,0.2),
+    sigma ~ dexp(1)
+  ), data = dWD
+)
+
+mu_M_A <- link(mAr)
+#Average of the Divorce rate means caused by the median age in the 50 states are as follows:
+mu_M_A_mean <- apply(mu_M_A, 2, mean)
+mu_M_A_resid <- dWD$M - mu_M_A_mean
+dWD$mu_M_A_resid <- mu_M_A_resid
+
+# Building a residual plot
+mAResDiv <- quap(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bR*mu_M_A_resid,
+    a ~ dnorm(0,0.2),
+    bR ~dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data = dWD
+)
+res_seq_MA <- seq(-2,2, length.out=100)
+mu_RMA <- link(mAResDiv, data = data.frame(mu_M_A_resid=res_seq_MA))
+mu_RMA_mean <- apply(mu_RMA, 2, mean)
+mu_RMA_PI <- apply(mu_RMA, 2, PI)
+
+
+par(mfrow=c(1,2))
+
+plot(M ~ A, data = dWD, col=rangi2,
+     xlab = 'Median Age at Marraige(std)',
+     ylab = 'Marraige rate (std)')
+lines(dWD$A, mu_M_A_mean)
+segments(dWD$A, mu_M_A_mean, dWD$A, dWD$M)
+
+plot(dWD$D ~ mu_M_A_resid, col= rangi2,
+     xlab = 'M ~ A residuals',
+     ylab = 'Divorce rate(std)')
+abline(v=0, lty=2)
+lines(res_seq_MA, mu_RMA_mean)
+shade(mu_RMA_PI,res_seq_AM )
+
+```
+
+```{r}
+mMr <- quap(
+  alist(
+    A ~ dnorm(mu, sigma),
+    mu <- a + bAM * M,
+    bAM ~ dnorm(0,0.5),
+    a ~ dnorm(0,0.2),
+    sigma ~ dexp(1)
+  ), data = dWD
+)
+
+mu_A_M <- link(mMr)
+#Average of the Divorce rate means caused by the median age in the 50 states are as follows:
+mu_A_M_mean <- apply(mu_A_M, 2, mean)
+mu_A_M_resid <- dWD$A - mu_A_M_mean
+dWD$mu_A_M_resid <- mu_A_M_resid
+
+# Building a residual plot
+mMAResDiv <- quap(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bR*mu_A_M_resid,
+    a ~ dnorm(0,0.2),
+    bR ~dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data = dWD
+)
+res_seq_AM <- seq(-2,2, length.out=100)
+mu_RAM <- link(mMAResDiv, data = data.frame(mu_A_M_resid=res_seq_AM))
+mu_RAM_mean <- apply(mu_RAM, 2, mean)
+mu_RAM_PI <- apply(mu_RAM, 2, PI)
+
+par(mfrow=c(1,2))
+
+plot(A ~ M, data = dWD, col=rangi2,
+     xlab = 'Marraige rate (std)',
+     ylab = 'Median Age at Marraige(std)')
+lines(dWD$M, mu_A_M_mean)
+segments(dWD$M, mu_A_M_mean, dWD$M, dWD$A)
+
+plot(dWD$D ~ mu_A_M_resid, col= rangi2,
+     xlab = 'A ~ M residuals',
+     ylab = 'Divorce rate(std)')
+abline(v=0, lty=2)
+lines(res_seq_AM, mu_RAM_mean)
+shade(mu_RAM_PI,res_seq_AM )
+
+```
+
+The key take-away in the above mentioned plots is that regression models measure the remaining association with the outcome after already knowing all the other predictors.
+
+## A Counterfactual plot for multivariate regression
+
+```{r}
+
+# Studying counterfactual for average age and Marraige rate between -2 and 2 
+M_seq <- seq(from=-2, to=3, length.out = 100)
+pred_data <- data.frame(M=M_seq, A=0)
+
+#Computre counterfactual mean divorce rate
+mu_M <- link(mAM, data = pred_data)
+mu_mean_M <- apply(mu_M, 2, mean)
+mu_PI_M <- apply(mu_M, 2, PI)
+
+# Simulate counterfactual divorce rates
+D_sim_M <- sim(mAM, data=pred_data, n=1e4)
+D_PI_M <- apply(D_sim_M, 2, PI)
+
+# Studying counterfactual for average age and Median Age between -2 and 2 
+A_seq <- seq(from=-2, to=3, length.out = 100)
+pred_data <- data.frame(M=0, A=A_seq)
+
+#Computre counterfactual mean divorce rate
+mu_A <- link(mAM, data = pred_data)
+mu_mean_A <- apply(mu_A, 2, mean)
+mu_PI_A <- apply(mu_A, 2, PI)
+
+# Simulate counterfactual divorce rates
+D_sim_A <- sim(mAM, data=pred_data, n=1e4)
+D_PI_A <- apply(D_sim_A, 2, PI)
+
+par(mfrow=c(1,2))
+# Plot the data for A=0
+plot(D ~ M, data=dWD, col=rangi2, xlab='Marriage rate (standardized)',
+     ylab='Divorce rate (standardized)')
+mtext( "Median age marriage (std) = 0" )
+lines(M_seq, mu_mean_M)
+shade(mu_PI_M, M_seq)
+shade(D_PI_M, M_seq)
+
+# Plot the data for M=0
+plot(D ~ M, data=dWD, col=rangi2, xlab='Median Age (standardized)',
+     ylab='Divorce rate (standardized)')
+mtext( "Marriage Rate (std) = 0" )
+lines(M_seq, mu_mean_A)
+shade(mu_PI_A, M_seq)
+shade(D_PI_A, M_seq)
+
+
+```
+
+## Posterior Prediction Plots
+
+```{r}
+# predicting simulation averaging over the posterior
+mu <- link(mAM)
+
+# simulate samples across cases
+mu_mean <- apply(mu, 2, mean)
+mu_PI <- apply(mu, 2, PI)
+
+# simulate observations
+D_sim <- sim(mAM, n=1e3)
+D_PI <- apply(D_sim, 2, mean)
+
+plot(mu_mean ~ dWD$D, col=rangi2,
+     xlab='Observed Divorce',
+     ylab='Predicted Divorce')
+
+abline(a=0, b=1, lty=2)
+
+
+for (i in 1:nrow(dWD))
+  lines(rep(dWD$D[i],2), mu_PI[,i], col=rangi2)
+
+```
+
+The model seems to overpredict for states with low divorce rates and underpredict for those with high divorce rates. This is expected to happen as regression model is skeptical of extreme values and regresses towards the mean.

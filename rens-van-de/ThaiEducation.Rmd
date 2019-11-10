@@ -1,0 +1,167 @@
+Learning from https://www.rensvandeschoot.com/tutorials/generalised-linear-models-with-brms/
+
+```{r}
+
+require(gridExtra)
+require(tidyverse)
+require(haven)
+require(ROCR)
+require(brms)
+require(modelr)
+require(tidybayes)
+require(bayesplot)
+require(grid)
+
+```
+
+Importing data
+```{r}
+ThaiEdu_Raw <- read_sav("https://github.com/MultiLevelAnalysis/Datasets-third-edition-Multilevel-book/blob/master/chapter%206/Thaieduc/thaieduc.sav?raw=true")
+ThaiEdu_Raw
+
+write.csv2(ThaiEdu_Raw, file = "ThaiEducation.csv")
+```
+
+```{r}
+
+df <- read.csv("ThaiEducation.csv", sep = ";")
+df
+
+```
+
+
+```{r}
+
+df <- df %>%
+  mutate(SCHOOLID = factor(SCHOOLID),
+         SEX = if_else(SEX == 0, "girl", "boy"),
+         SEX = factor(SEX, levels = c("girl", "boy")),
+         PPED = if_else(PPED == 0, "no", "yes"),
+         PPED = factor(PPED, levels = c("no", "yes")))
+
+df <- df %>% filter(!(is.na(MSESC)))
+
+head(df)
+
+```
+
+Question 1: what are the effects of gender and preschool education on whether a pupil repeats a grade?
+
+Simple explorations
+```{r}
+
+# p1 <- df %>%
+#   group_by(SEX, REPEAT) %>%
+#   summarise(count = n()) %>%
+#   ggplot(aes(x = SEX, y = count, fill = factor(REPEAT))) +
+#     geom_bar(stat = "identity")
+# 
+# p2 <- df %>%
+#   group_by(PPED, REPEAT) %>%
+#   summarise(count = n()) %>%
+#   ggplot(aes(x = PPED, y = count, fill = factor(REPEAT))) +
+#     geom_bar(stat = "identity")
+# 
+# grid.arrange(p1, p2, nrow = 1)
+
+df %>%
+  group_by(SEX, PPED, REPEAT) %>%
+  summarise(count = n()) %>%
+  gather(key, lvls, -count, -REPEAT) %>%
+  ggplot(aes(x = lvls, y = count, fill = factor(REPEAT))) + geom_bar(stat = "identity")
+
+df
+```
+
+Simple brms models
+```{r}
+
+m1 <- brm(data = df, family = bernoulli(),
+          formula = REPEAT ~ SEX + PPED,
+          chains = 4, cores = 4)
+
+```
+
+Checking model convergence
+```{r}
+mcmc_trace(m1)
+
+```
+
+The above plot shows iterations after burn-in.  There sones't seem to be divergences.
+
+Below we check of strong auto correlations that could bias the variance estimates.
+
+```{r}
+
+stanplot(m1, type = "acf_bar")
+
+```
+Model interpretation
+```{r}
+
+summary(m1)
+
+mcmc_dens(m1)
+
+stanplot(m1, type = "areas", prob = 0.95)
+
+```
+
+Using spread draws
+```{r}
+
+get_variables(m1)
+
+m1 %>%
+  spread_draws(b_Intercept, b_SEXboy, b_PPEDyes) %>%
+  median_qi(preds = exp(b_Intercept + b_SEXboy + b_PPEDyes))
+
+table(interaction(df$SEX, df$PPED))
+
+```
+
+Prediction using the current model
+
+```{r}
+
+df %>%
+  data_grid(SEX, PPED) %>%
+  add_fitted_draws(m1) %>%
+  ggplot(aes(x = .value, y = interaction(SEX, PPED))) +
+    stat_pointintervalh() +
+    coord_flip() +
+    xlab("predicted probability") +
+    scale_x_continuous(breaks = seq(0, 0.24, 0.02))
+
+```
+
+Bayesian binomial logistic regression:
+
+data prep
+
+```{r}
+
+ThaiEdu_Prop <- df %>%
+  group_by(SCHOOLID, MSESC) %>%
+  summarise(REPEAT = sum(REPEAT),
+            TOTAL = n()) %>%
+  ungroup()
+
+head(ThaiEdu_Prop)
+
+```
+
+```{r}
+
+m2 <- brm(data = ThaiEdu_Prop, family = binomial(link = "logit"),
+          formula = REPEAT | trials(TOTAL) ~ MSESC,
+          cores = 4, chains = 4)
+
+```
+
+```{r}
+
+mcmc_trace(m2)
+
+```

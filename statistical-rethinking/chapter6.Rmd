@@ -1,0 +1,330 @@
+# Multi-collinearity
+
+This indictes that there is a very strong relationship between 2 or more variables.
+
+## Building the dataset
+```{r}
+
+library(rethinking)
+library(dagitty)
+
+N <- 100 # NUmber of individuals
+set.seed(909)
+height <- rnorm(n = N, mean = 10, sd = 2)
+leg_prop <- runif(n = N, min = 0.4, max = 0.5)
+
+leg_left <- leg_prop*height + rnorm(n = N, mean = 0, sd = 0.02)  # Adding an error term
+leg_right <- leg_prop*height + rnorm(n = N, mean = 0, sd = 0.02)  
+
+d <- data.frame(height, leg_left, leg_right)
+str(d)
+
+```
+
+## Simple model
+
+```{r}
+
+mMC <- quap(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a + bl*leg_left + br*leg_right,
+    a ~ dnorm(10,100),
+    bl ~ dnorm(2,10),
+    br ~ dnorm(2,10),
+    sigma ~ dexp(1)
+  ), data = d
+)
+
+precis(mMC)
+
+```
+
+The question we are asking the model is what is value of know leg_left when we already know leg_right and vice-versa and the model is answering this question correctly.
+
+
+```{r}
+
+post <- extract.samples(mMC)
+
+par(mfrow=c(1,2))
+plot(bl~br, data=post, col=rangi2)
+dens(post$bl+post$br, col=rangi2, xlab='sum of bl and br')
+
+```
+Given the multicollinearity issue the model had given the right answer for the sum of the two coefficients.
+
+## Consider only one leg
+
+```{r}
+
+mOL <- quap(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a + bl*leg_left,
+    a ~ dnorm(0,0.5),
+    bl ~ dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data = d
+)
+precis(mOL)
+
+```
+
+## Solving the milk problem
+
+### Creating the dataset
+```{r}
+
+data("milk")
+data("milk")
+d <- milk
+
+d$K <- scale(d$kcal.per.g)
+d$F <- scale(d$perc.fat)
+d$L <- scale(d$perc.lactose)
+
+```
+
+### Building individual regression models
+
+```{r}
+
+mF <- quap(
+  alist(
+    K ~ dnorm(mu, sigma),
+    mu <- a + bF*F,
+    bF ~ dnorm(0,0.5),
+    a ~ dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data = d
+)
+
+precis(mF)
+
+mL <- quap(
+  alist(
+    K ~ dnorm(mu, sigma),
+    mu <- a + bL*L,
+    a ~ dnorm(0,1),
+    bL ~ dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data = d
+)
+
+precis(mL)
+
+mLF <- quap(
+  alist(
+    K ~ dnorm(mu, sigma),
+    mu <- a + bF*F + bL*L,
+    a ~ dnorm(0,1),
+    bL ~ dnorm(0,0.5),
+    bF ~ dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data = d
+)
+
+precis(mLF)
+
+pairs(~K+L+F, d)
+
+```
+
+The posterior means of the coefficients are closer to zero than the individual bi-variate plots.  This tells us that once we know one of the variables, there is little that the other variable can add in the form of information.  hence their coefficients are closer to zero.
+
+### A closer look at the precis outputs
+
+```{r}
+
+F_seq <- seq(-5,5, length.out = 2)
+mu_F <- link(mF, data=data.frame(F=F_seq))
+mu_F_mean <- apply(mu_F, 2, mean)
+mu_F_PI <- apply(mu_F, 2, PI)
+
+K_sim_F <- sim(mF, data=data.frame(F=F_seq))
+K_sim_F_PI <- apply(K_sim_F, 2, PI)
+
+
+
+L_seq <- seq(-5,5, length.out = 2)
+mu_L <- link(mL, data=data.frame(L=L_seq))
+mu_L_mean <- apply(mu_L, 2, mean)
+mu_L_PI <- apply(mu_L, 2, PI)
+
+K_sim_L <- sim(mL, data=data.frame(L=L_seq))
+K_sim_L_PI <- apply(K_sim_L, 2, PI)
+
+par(mfrow=c(1,2))
+
+plot(K ~ F, data=d, col=rangi2)
+lines(F_seq, mu_F_mean)
+shade(mu_F_PI, F_seq)
+shade(K_sim_F_PI, F_seq)
+
+plot(K ~ L, data=d, col=rangi2)
+lines(L_seq, mu_L_mean)
+shade(mu_L_PI, L_seq)
+shade(K_sim_L_PI, L_seq)
+
+```
+
+# Post Treatment Bias
+
+The idea here is explore the issues with adding variables, which could be a post treatment effect.
+
+```{r}
+# number of plants
+
+N <- 100
+
+# simulating the initial heights
+h0 <- rnorm(N, 10, 2)
+
+# Assign treatments and simulate fungus growth
+treatment <- rep(0:1, each=N/2)
+fungus <- rbinom(N, size = 1, prob = 0.5 - treatment*0.4)
+
+h1 <- h0 + rnorm(N, 5 - 3*fungus)
+
+# compose clean dataframe
+d <- data.frame(h0=h0, h1=h1, treatment=treatment, fungus=fungus)
+d
+```
+
+
+## Prior design considerations
+
+Thinking through the logic
+1. Plants will grow in proportion to their initial height
+2. Some plants could die due to the treatment, or their height could reduce
+3. In any case the height needs to be positive (>=0)
+
+We could consider using a log normal distribution, which is always positive.
+
+```{r}
+sim_p <- rlnorm(1e4, mean = 0., sd = 0.25)
+
+# Building a simple multiplicative model where new height = old height * prop. which tells us how tall it will grow to
+mBasic <- quap(
+  alist(
+    h1 <- dnorm(mu, sigma),
+    mu <- h0*p,
+    p ~ dlnorm(0, 0.25),
+    sigma ~ dexp(1)
+  ), data = d
+)
+
+precis(mBasic)
+```
+
+```{r}
+# Now we would like to include treatment and fungal effects.
+mBiV <- quap(
+  alist(
+    h1 ~ dnorm(mu, sigma),
+    mu <- h0*p,
+    p <- a + bT*treatment + bF*fungus,
+    a ~ dlnorm(0, 0.25),
+    bT ~ dnorm(0, 0.5),
+    bF ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d
+)
+
+precis(mBiV)
+
+```
+
+The output above suggests that there is not much impact of the treatment, but a negative impact on the plant growth depending on the presence of fungus.  The question we are asking the model is that given that I know the fungus presence, which is an outcome of the treatment, what is the impact of knowing the treatment status.  Now let us build a model purely by ignoring the fungus variable.
+
+```{r}
+
+mT <- quap(
+  alist(
+    h1 ~ dnorm(mu, sigma),
+    mu <- h0*p,
+    p <- a + bT*treatment,
+    a ~ dlnorm(0, 0.25),
+    bT ~ dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data = d
+)
+
+precis(mT)
+```
+
+## Plotting the graph using daggity
+
+```{r}
+
+plant_dag <- dagitty( "dag {
+  H0 -> H1
+  F -> H1
+  T -> F
+}")
+
+coordinates( plant_dag ) <- list( x=c(H0=0,T=2,F=1.5,H1=1) , y=c(H0=0,T=0,F=1,H1=2) )
+plot( plant_dag )
+
+```
+
+The message here is that including the post treatment variable can mask the treatment itself. In other words, learning about the treatment tells us nothing about the plant height when we already know the fungus growth.  
+
+# Collider Bias
+
+The key message is that when you condition on a collider, it creates a statistical, but not necessarily causal, association among its causes. In other words, using a collider as a predictor variable generates a misleading association inside the statistical model leading us to make rroneous causal inference.
+
+The variables under question are age, marriage and happiness.  The Question that we want to ask is, whether age is related to happiness?
+
+## Simuating the data
+```{r}
+
+d <- sim_happiness(seed = 1977, N_years = 1e3)
+str(d)
+
+```
+
+
+```{r}
+
+d2 <- d[d$age>17,]
+d2$A <- (d2$age - 18)/(65-18)
+d2$mid <- d2$married + 1
+
+mH <- quap(
+  alist(
+    happiness ~ dnorm(mu, sigma),
+    mu <- a[mid] + bA*A,
+    a[mid] ~ dnorm(0,1),
+    bA ~ dnorm(0,2),
+    sigma ~ dexp(1)
+  ), data = d2
+)
+
+precis(mH, depth = 2)
+
+```
+
+This model clearly tells us that age is negatively correlated with happiness.
+
+### Building a separate model between age and happiness
+```{r}
+
+mH_onlyA <- quap(
+  alist(
+    happiness <- dnorm(mu, sigma),
+    mu <- a + bA*A,
+    a ~ dnorm(0,1),
+    bA ~ dnorm(0,2),
+    sigma ~ dexp(1)
+  ), data = d2
+)
+
+precis(mH_onlyA)
+
+```
+
+This tells us that there is no relationship between happiness and age.  Comparing the 2 previous models, it looks like, marriage has induced a spurious negative statistical association between age and happiness, and not a causal association.
+
+Question: Considering marriage for regression, is it equivalent to conditioning on that variable?  Given that marriage is a collider, we believe 

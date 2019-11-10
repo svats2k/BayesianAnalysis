@@ -1,0 +1,209 @@
+*Issues with adding more variables to the model*
+
+It almost always improves the fit, or the ability of the model to retrodict the data used to build the model. One of the typical measures is R^2.  Complex models fit the data better, however they predict new data worse.
+
+Regular features - Targets of our learning, because they help us to generalize.
+Irreguar features are those aspects of data that don't generalize well.
+
+### Invoking packages
+```{r include=FALSE}
+library(rethinking)
+
+```
+
+
+### Dataframe creation
+```{r}
+sppnames <- c("afarensis", "africanus", "habilis", "boisei", "rudolfensis", "ergaster", "sapiens")
+brainvolcc <- c(438, 452, 612, 521, 752, 871, 1350)
+masskg <- c(37.0, 35.5, 34.5, 41.5, 55.5, 61.0, 53.5)
+d <- data.frame(species = sppnames, brain = brainvolcc, mass = masskg)
+
+d$mass_std <- (d$mass - mean(d$mass)) / sd(d$mass)
+d$brain_std <- d$brain / max(d$brain)
+
+str(d)
+
+```
+
+## Building a basic model
+
+```{r}
+mB1 <- quap(
+  alist(
+    brain_std ~ dnorm(mu, sigma),
+    mu <- a + b * mass_std,
+    a ~ dnorm(0.5, 1),
+    b ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d
+)
+
+precis(mB)
+
+```
+
+## Computing the R-squared
+
+```{r}
+set.seed(12)
+
+compute_R2 <- function(quap_fit) {
+  s <- sim(quap_fit)
+  r <- apply(s, 2, mean) - d$brain_std
+  resid_var <- var2(r)
+  outcome_var <- var2(d$brain_std)
+  1 - resid_var / outcome_var
+}
+
+R2 <- compute_R2(mB)
+
+```
+
+## Build multiple models
+
+```{r}
+
+mB2 <- quap(
+  alist(
+    brain_std ~ dnorm(mu, sigma),
+    mu <- a + b[1] * mass_std + b[2] * mass_std^2,
+    a ~ dnorm(0.5, 1),
+    b ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d, start = list(b = rep(0, 2))
+)
+
+mB3 <- quap(
+  alist(
+    brain_std ~ dnorm(mu, sigma),
+    mu <- a + b[1] * mass_std + b[2] * mass_std^2 + b[3] * mass_std^3,
+    a ~ dnorm(0.5, 1),
+    b ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d, start = list(b = rep(0, 3))
+)
+
+mB4 <- quap(
+  alist(
+    brain_std ~ dnorm(mu, sigma),
+    mu <- a + b[1] * mass_std + b[2] * mass_std^2 + b[3] * mass_std^3 + b[4] * mass_std^4,
+    a ~ dnorm(0.5, 1),
+    b ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d, start = list(b = rep(0, 4))
+)
+
+mB4 <- quap(
+  alist(
+    brain_std ~ dnorm(mu, exp(log_sigma)),
+    mu <- a + b[1] * mass_std + b[2] * mass_std^2 + b[3] * mass_std^3 + b[4] * mass_std^4,
+    a ~ dnorm(0.5, 1),
+    b ~ dnorm(0, 0.5),
+    log_sigma ~ dnorm(0, 1)
+  ), data = d, start = list(b = rep(0, 4))
+)
+
+mB5 <- quap(
+  alist(
+    brain_std ~ dnorm(mu, exp(log_sigma)),
+    mu <- a + b[1] * mass_std + b[2] * mass_std^2 + b[3] * mass_std^3 + 
+          b[4] * mass_std^4 + b[5] * mass_std^5,
+    a ~ dnorm(0.5, 1),
+    b ~ dnorm(0, 0.5),
+    log_sigma ~ dnorm(0, 1)
+  ), data = d, start = list(b = rep(0, 5))
+)
+
+mB6 <- quap(
+  alist(
+    brain_std ~ dnorm(mu, 0.001),
+    mu <- a + b[1] * mass_std + b[2] * mass_std^2 + b[3] * mass_std^3 + b[4] * mass_std^4 + b[5] * mass_std^5 + b[6] * mass_std^6,
+    a ~ dnorm(0.5, 1),
+    b ~ dnorm(0, 0.5),
+    log_sigma ~ dnorm(0, 1)
+  ), data = d, start = list(b = rep(0, 6))
+)
+
+compute_R2(mB1)
+compute_R2(mB2)
+compute_R2(mB3)
+compute_R2(mB4)
+compute_R2(mB5)
+compute_R2(mB6)
+```
+
+## Plot preds
+
+```{r}
+
+plot_r2 <- function(quap_fit, title) {
+  mass_seq <- seq(from = min(d$mass_std), to = max(d$mass_std), length.out = 100)
+  l <- link(quap_fit, data = data.frame(mass_std = mass_seq))
+  mu_preds <- apply(l, 2, mean)
+  mu_PI <- apply(l, 2, PI)
+  plot(brain_std ~ mass_std, data = d,
+       ylim = range(mu_preds),
+       xlab = "body mass (cc)",
+       ylab = "brain volume (cc)")
+  lines(mass_seq, mu_preds)
+  shade(mu_PI, mass_seq)
+  mtext(title)
+}
+
+par(mfrow = c(3, 2))
+plot_R2(mB, round(compute_R2(mB), 2))
+plot_R2(mB2, round(compute_R2(mB2), 2))
+plot_R2(mB3, round(compute_R2(mB3), 2))
+plot_R2(mB4, round(compute_R2(mB4), 2))
+plot_R2(mB5, round(compute_R2(mB5), 2))
+plot_R2(mB6, round(compute_R2(mB6), 2))
+
+```
+
+
+WAIC calculations
+
+```{r}
+data(cars)
+
+m <- quap(
+  alist(
+    dist ~ dnorm(mu, sigma),
+    mu <- a + b * speed,
+    a ~ dnorm(0, 100),
+    b ~ dnorm(0, 10),
+    sigma ~ dexp(1)
+  ), data = cars
+)
+
+precis(m)
+
+post <- extract.samples(m, n = 1e3)
+
+```
+
+Log likelihood of each observation
+
+```{r}
+
+llp <- function(s) {
+  mu <- post$a[s] + post$b[s] * cars$speed
+  dnorm(cars$dist, mu, post$sigma[s], log = T)
+}
+
+n_samples <- 1000
+logprob <- sapply(1:n_samples, llp)
+
+n_cases <- nrow(cars)
+lppd <- sapply(1:n_cases, function(i) log_sum_exp(logprob[i, ])) - log(n_samples)
+
+# To compute pWAIC, which is a measure of variance in the log probabilities in each of the samples
+pWAIC <- sapply(1: n_cases, function(i) var(logprob[i, ]))
+
+-2 * (sum(lppd) - sum(pWAIC))
+
+```
+
+Plant examples and understanding the post treatment bias
+

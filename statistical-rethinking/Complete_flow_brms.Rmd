@@ -1,0 +1,266 @@
+Reading the libraries
+```{r}
+require(rethinking)
+require(tidyr)
+require(dplyr)
+require(ggplot2)
+require(brms)
+require(bayesplot)
+
+```
+
+Reading in the data
+
+```{r}
+
+data(Howell1)
+d <- Howell1
+rm(Howell1)
+
+d <- d %>% mutate(gen_categ=as.factor(male + 1))
+d2 <- d[d$age > 18,]
+# d2$weight_cc <- scale(d2$weight)
+d2$weight_cc <- (d2$weight - mean(d2$weight))/sd(d2$weight)
+
+
+head(d2)
+```
+
+# Simple model and no predictors
+
+## Model Build
+```{r}
+
+m1 <- brm(data = d2, family = gaussian,
+          height ~ 1,
+          prior = c(prior(normal(180,20), class=Intercept),
+                    prior(cauchy(0,2), class=sigma)),
+          sample_prior = "yes",
+          iter = 2000, warmup = 500, chains = 4, cores = 4)
+
+```
+
+```{r}
+mcmc_intervals(prior_samples(m1))
+mcmc_intervals(posterior_samples(m1))
+mcmc_areas(posterior_samples(m1))
+mcmc_hist_by_chain(m1)
+mcmc_dens_overlay(m1)
+mcmc_pairs(m1, pars = c('b_Intercept', 'sigma'))
+mcmc_pairs(m1, pars = c('prior_Intercept', 'prior_sigma'))
+mcmc_trace(m1)
+```
+
+## trace plots
+
+```{r}
+
+prior_summary(m1)
+posterior_summary(m1)
+nsamples(m1)
+
+m1$fit
+```
+
+```{r}
+
+post <- posterior_samples(m1)
+head(post)
+summary(post)
+
+prior_s <- prior_samples(m1)
+head(prior_s)
+summary(prior_s)
+
+```
+
+
+
+The prior is totally meaningless and still we ended up  need to refine it further to 
+
+```{r}
+# Model with a numeric covariate
+m2 <- brm(data = d2, family = gaussian,
+          height ~ 1 + weight_cc,
+          prior = c(prior(normal(0, 20), class=Intercept),
+                    prior(normal(0, 1), class=b),
+                    prior(cauchy(0,2), class=sigma)),
+          sample_prior = "yes",
+          iter = 2000, warmup = 500, chains = 4, cores = 4
+)
+```
+
+```{r}
+mcmc_dens(prior_samples(m2))
+mcmc_dens(posterior_summary(m2))
+
+mcmc_intervals(m2, pars = c("b_Intercept", "b_weight_cc", "sigma", "prior_Intercept", "prior_b", "prior_sigma"))
+
+```
+
+```{r}
+
+
+d2 %>%
+  ggplot(aes(x=weight_cc, y=height)) + geom_point(size=2, shape=1) +
+    geom_abline(slope = fixef(m2)[2],
+                intercept = fixef(m2)[1]) +
+    theme_bw()
+
+```
+
+Predicting the average height
+
+```{r}
+
+post <-posterior_samples(m2)
+
+post %>% transmute(mu_at_50=b_Intercept+b_weight_cc*((50-mean(d2$weight))/sd(d2$weight)))
+
+
+weight_vals <- seq(from=-2, to = +2, by = 0.1)
+weight_seq <- data.frame(weight_cc=weight_vals)
+mu_preds <- post$b_Intercept + ((50-mean(d2$weight))/sd(d2$weight)) * post$b_weight_cc
+hist(mu_preds, breaks = 100)
+
+
+fitted(object = m2, newdata = weight_seq)
+predict(object = m2, newdata = weight_seq)
+
+showMethods(link)
+```
+
+```{r}
+
+preds_mu <- fitted(m2, newdata = weight_seq) %>% as_tibble() %>% bind_cols(weight_seq)
+
+preds_y <- predict(m2, newdata = weight_seq) %>% as_tibble() %>% bind_cols(weight_seq)
+
+d2 %>%
+  ggplot(aes(x=weight_cc)) +
+    geom_point(aes(y=height)) +
+    geom_smooth(data = preds_mu, fill='grey70', color = 'black', alpha = 2/3,
+                aes(y = Estimate, ymin = Q2.5, ymax = Q97.5), 
+                stat = 'identity') +
+    geom_ribbon(data = preds_y, aes(y = Estimate, ymin = Q2.5, ymax = Q97.5), fill='grey83', alpha = 1/2)
+
+
+```
+
+Plausible lines implied by the prior
+```{r}
+
+prior <- prior_samples(m2)
+post <- posterior_samples(m2)
+
+p <- ggplot(data = d2, aes(x=weight_cc, y=height)) + geom_point(stat='identity')
+# p <- p + geom_abline(slope = prior$b[1], intercept = prior$Intercept[1])
+p <- p + geom_abline(slope = post$b_Intercept[1], intercept = post$b_weight_cc[1], color='red')
+p
+
+# ggplot(data = d2, aes(x=weight_cc, y=height)) + 
+#   geom_point(stat='identity') + geom_abline(slope = prior$b[1], intercept = prior$Intercept[1], color='red')
+# ggplot(data = d2, aes(x=weight_cc, y=height)) + geom_point(stat='identity') + geom_abline(slope = post$b_weight_cc[1], intercept = post$b_Intercept[1], color='red')
+# ggplot() + geom_abline(aes(slope = prior$b[1], intercept = prior$Intercept[1]), color='red') + xlim(-100,100) + ylim(-500, 500)
+# ggplot() + geom_abline(aes(slope = post$b_Intercept[1], intercept = post$b_weight_cc[1]), color='red') + xlim(-100,100) + ylim(-500, 500)
+
+ggplot(data = d2, aes(x=weight_cc, y=height)) + xlim(-100,100) + ylim(-500, 500)
+
+post$b_Intercept[1]
+post$b_weight_cc[1]
+
+p <- ggplot(data = d2, aes(x=weight_cc, y=height)) + geom_point(stat='identity')#+ xlim(-10,10) + ylim(-250, 250)
+for (i in nrow(prior)) {
+  p <- p + 
+          # geom_abline(slope = post$prior_b[i], intercept = post$prior_Intercept[i]) +
+          geom_abline(slope = post$b_weight_cc[i], intercept = post$b_Intercept[i], color='red')
+}
+p
+
+
+posterior_samples(m2, pars = c('b_Intercept', 'b_weight_cc')) %>% summary
+mcmc_dens(m2, pars = c('b_Intercept', 'b_weight_cc', 'sigma', 'prior_Intercept', 'prior_b', 'prior_sigma'))
+```
+
+```{r}
+lppd(m2, n=1e5)
+compare(m1, m2)
+```
+
+
+
+Understanding covariate modeling
+```{r}
+
+d2$female <- 1 - d2$male
+d2$female <- as.factor(d2$female)
+d2$male <- as.factor(d2$male)
+
+head(d2)
+
+# Model with a categorical covariate
+m3 <- brm(data = d2, family = gaussian,
+          height ~ 0 + male,
+          prior = c(prior(normal(0,20), class=b),
+                    prior(cauchy(0,2), class=sigma)),
+          iter = 2000, warmup = 500, chains = 4, cores = 4)
+
+
+# Model with a categorical covariate
+get_prior(data = d2, family = gaussian, height ~ 1 + male)
+
+m4 <- brm(data = d2, family = gaussian,
+          height ~ 1 + male,
+          prior = c(prior(normal(0,20), class=Intercept),
+                    prior(normal(0,20), class=b, coef=male1),
+                    prior(cauchy(0,2), class=sigma)),
+          iter = 2000, warmup = 500, chains = 4, cores = 4)
+
+# Model with a categorical covariate
+get_prior(data = d2, family = gaussian, height ~ 1 + male + female)
+
+m5 <- brm(data = d2, family = gaussian,
+          height ~ 1 + male + female,
+          prior = c(prior(normal(0,20), class=Intercept),
+                    prior(normal(0,20), class=b, coef=male1),
+                    prior(normal(0,20), class=b, coef=female1),
+                    prior(cauchy(0,2), class=sigma)),
+          iter = 2000, warmup = 500, chains = 4, cores = 4)
+
+```
+
+Extracting samples from the posterior
+```{r}
+
+plot(m3)
+plot(m3_prior)
+
+```
+
+```{r}
+
+prior_samples(m2)
+
+```
+
+Visualizing the chains
+```{r}
+
+
+mcmc_dens(m1)
+
+```
+
+Prior Predictive simulations
+
+```{r}
+
+
+```
+
+Posterior predictive simulations
+
+```{r}
+
+
+```

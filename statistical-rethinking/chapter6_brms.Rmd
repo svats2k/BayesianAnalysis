@@ -1,0 +1,99 @@
+```{r}
+library(brms)
+library(ggplot2)
+library(tidyverse)
+library(tidybayes)
+library(purrr)
+library(bayesplot)
+
+source("init_stan_settings.R")
+```
+
+Begining Information Theory
+
+Information entropy: The uncertainity contained in an event is the avergae log probability of the event.
+
+Let us assume, we are trying to model the weather on any particular day.  If the probability of rain =0.3 and that of sun is 0.7.  The 
+
+```{r}
+
+p <- c(0.3, 0.7)
+-sum(p*log(p))
+```
+
+The uncertainity inherent in the distribution of events is 0.61.  This tell us how hard it is to hit the target.
+
+Divergence: The additional undertainity introduced by using probabilities from one distribution to describe another.  This is also called as KL distance.
+
+True or target distribution, p <- c(0.3, 0.7). Lets say we use q <- c(0.25, 0.75) to describe it.  The additional uncertianity we have introduced because of useing q to describe p is
+
+```{r}
+p <- c(0.3, 0.7)
+q1 <- c(0.1, 0.9)
+q2 <- c(0.25, 0.75)
+
+message(paste('The distance between p and q1:', -sum(p*log(p/q1))))
+message(paste('The distance between p and q2:', -sum(p*log(p/q2))))
+
+```
+
+```{r}
+
+t <- tibble(
+  p_1 = 0.3,
+  p_2 = 0.7,
+  q_1 = seq(from=0.01, to = 0.99, by = 0.01)) %>% 
+  mutate(q_2 = 1 - q_1) %>%
+  mutate(d_kl = (p_1*log(p_1/q_1)+p_2*log(p_2/q_2)))
+
+t %>%
+  ggplot(aes(x=q_1, y=d_kl)) + geom_line() +
+  geom_vline(xintercept = 0.3, linetype=2) +
+  ylab('Divergence of q from p') +
+  xlab('q[1]')
+
+```
+
+
+
+In essence divergence helps us contrast differnt approximations of p.
+
+In reality, since we do not know the actual proability distribution.  This approach gives us a way to know, between 2 distributions, which is closer to the target than the other.  This is simply measured by using the average log probability of the distribution under question. 
+
+```{r}
+
+sppnames <- c( "afarensis","africanus","habilis","boisei", "rudolfensis","ergaster","sapiens")
+brainvolcc <- c( 438 , 452 , 612, 521, 752, 871, 1350 )
+masskg <- c( 37.0 , 35.5 , 34.5 , 41.5 , 55.5 , 61.0 , 53.5 )
+d <- data.frame( species=sppnames , brain=brainvolcc , mass=masskg )
+
+d$mass_cc <- (d$mass - mean(d$mass))/sd(d$mass)
+
+
+lm(data = d, brainvolcc ~ masskg) %>% logLik()*2
+
+```
+
+
+```{r}
+
+priors <- c(brms::prior(normal(0, 1000), class=Intercept),
+            brms::prior(normal(0,1000), class=b),
+            brms::prior(cauchy(0,10), class=sigma))
+
+b6.8 <- brm(data = d, family = gaussian,
+           brain ~ 1 + mass_cc,
+           prior = priors,
+           iter = 2000, warmup = 500, cores = 4, chains = 4,
+           sample_prior = "yes")
+
+```
+
+model diagnostics
+
+```{r}
+
+plot(b6.8)
+
+
+```
