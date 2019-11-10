@@ -1,0 +1,96 @@
+Source: https://www.rensvandeschoot.com/tutorials/brms-started/
+
+
+```{r}
+
+library(brms) # for the analysis
+library(haven) # to load the SPSS .sav file
+library(tidyverse) # needed for data manipulation.
+library(RColorBrewer) # needed for some extra colours in one of the graphs
+library(ggmcmc)
+library(ggthemes)
+library(ggridges)
+library(bayesplot)
+library(tidybayes)
+library(modelr)
+```
+
+```{r}
+
+popular2data <- read_sav(file = "https://github.com/MultiLevelAnalysis/Datasets-third-edition-Multilevel-book/blob/master/chapter%202/popularity/SPSS/popular2.sav?raw=true")
+
+df <- select(popular2data, pupil, class, extrav, sex, texp, popular) # we select just the variables we will use
+head(df) # we have a look at the first 6 observations
+
+df
+```
+
+```{r}
+
+ggplot(data  = df,
+       aes(x = extrav,
+           y = popular,
+           col = class,
+           group = class))+
+  geom_point(size = 1.2,
+             alpha = .8,
+             position = "jitter")+# to add some random noise for plotting purposes
+  theme_minimal()+
+  labs(title = "Popularity vs. Extraversion",
+       subtitle = "Added a regression line") +
+  geom_smooth(method = "lm",
+              se = F,
+              size = 0.5,
+              alpha = 0.8) +
+  theme(legend.position = "none") +
+  scale_color_gradientn(colours = rainbow(100))
+
+```
+
+Outcome: Popularity and extraversion is not the same for all classes.
+
+Data Analysis:
+
+Building an intercept only model
+
+```{r}
+
+m1 <- brm(
+  data = df, family = gaussian,
+  formula = popular ~ 1 + (1|class),
+  chains = 4, cores = 4)
+
+
+```
+
+```{r}
+get_variables(m1)
+
+m1 %>%
+  spread_draws(b_Intercept, r_class[class,]) %>%
+  median_qi(preds = b_Intercept + r_class) %>%
+  ggplot(aes(x = class, y = preds, ymin = .lower, ymax = .upper)) + geom_ribbon()
+
+```
+
+```{r}
+
+df %>%
+  data_grid(class) %>%
+  add_fitted_draws(m1) %>%
+  ggplot(aes(x = class, y = .value)) + geom_point()
+
+```
+
+Adding one level of predictor
+
+```{r}
+
+df %>% select(sex, extrav, class, popular)
+
+m3 <- brm(family = gaussian, data = df,
+          formula = 1 + sex + extrav + (1|class),
+          cores = 4, chains = 4)
+
+```
+
