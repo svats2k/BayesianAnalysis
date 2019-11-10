@@ -13,6 +13,7 @@ library(ggridges)
 library(bayesplot)
 library(tidybayes)
 library(modelr)
+library(gridExtra)
 ```
 
 ```{r}
@@ -64,7 +65,6 @@ m1 <- brm(
 ```
 
 ```{r}
-get_variables(m1)
 
 m1 %>%
   spread_draws(b_Intercept, r_class[class,]) %>%
@@ -86,11 +86,107 @@ Adding one level of predictor
 
 ```{r}
 
-df %>% select(sex, extrav, class, popular)
-
-m3 <- brm(family = gaussian, data = df,
-          formula = 1 + sex + extrav + (1|class),
+m2 <- brm(family = gaussian, data = df,
+          formula = popular ~ 1 + sex + extrav + (1|class),
           cores = 4, chains = 4)
 
 ```
+
+```{r}
+
+summary(m2)
+
+```
+
+```{r, fig.width=12}
+
+p1 <- m1 %>%
+  spread_draws(b_Intercept, r_class[class,]) %>%
+  median_qi(preds = b_Intercept + r_class) %>%
+  ggplot(aes(x = class, y = preds, ymin = .lower, ymax = .upper)) +
+    geom_ribbon(alpha = 0.4) +
+    geom_line() +
+    ggtitle("Varying intercepts only model")
+
+p2 <- m2 %>%
+  spread_draws(b_Intercept, b_sex, b_extrav, r_class[class,]) %>%
+  median_qi(preds = b_Intercept + b_sex + b_extrav + r_class) %>%
+  ggplot(aes(x = class, y = preds, ymin = .lower, ymax = .upper)) + 
+    geom_ribbon(alpha = 0.4) +
+    geom_line() +
+    ggtitle("sex, extrav and varying intercepts")
+
+grid.arrange(p1, p2, nrow = 1)
+
+```
+
+Model comparison
+
+```{r}
+
+w1 <- waic(m1)
+w2 <- waic(m3)
+
+compare_ic(loo1, loo2)
+```
+
+
+```{r}
+
+m3 <- brm(family = gaussian, data = df,
+          formula = popular ~ 1 + sex + extrav + texp + (1|class),
+          cores = 4, chains = 4)
+
+```
+
+
+
+Adding random slopes for both predictor variables (sex, extrav)
+```{r}
+
+m4 <- brm(family = gaussian, data = df,
+          formula = popular ~ 1 + sex + extrav + (1 + sex + extrav | class),
+          cores = 4, chains = 4)
+
+```
+
+```{r}
+
+get_variables(m4)
+
+m4 %>%
+  spread_draws(b_Intercept, b_sex, b_extrav, r_class[class, sex], r_class[class, extrav])
+
+```
+
+```{r}
+
+m5 <- brm(family = gaussian, data = df,
+          formula = popular ~ 1 + sex + (1 + sex | class),
+          cores = 4, chains = 4)
+
+```
+
+```{r}
+
+get_variables(m5)
+
+m5 %>%
+  spread_draws(b_Intercept, r_class[class, sex])
+
+df %>%
+  data_grid(class, sex) %>%
+  add_fitted_draws(m5) %>%
+  group_by(class, sex) %>%
+  summarise(lower95 = quantile(.value, probs = 0.025),
+            upper95 = quantile(.value, probs = 0.975),
+            distance = upper95 - lower95,
+            Meanestimate = mean(.value)) %>%
+  ggplot(aes(x = class, y = Meanestimate, ymin = lower95, ymax = upper95)) + geom_ribbon() + facet_grid(sex~.)
+
+```
+
+
+
+
 
