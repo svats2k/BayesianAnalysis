@@ -1,5 +1,6 @@
 Source: https://www.rensvandeschoot.com/tutorials/brms-started/
 
+This tutorial focusses on non-informative priors.
 
 ```{r}
 
@@ -56,10 +57,13 @@ Building an intercept only model
 
 ```{r}
 
+mfile = "models/pop_tut1_m1"
+
 m1 <- brm(
   data = df, family = gaussian,
   formula = popular ~ 1 + (1|class),
-  chains = 4, cores = 4)
+  chains = 4, cores = 4,
+  file = mfile)
 
 
 ```
@@ -86,9 +90,12 @@ Adding one level of predictor
 
 ```{r}
 
+mfile = "models/pop_tut1_m2"
+
 m2 <- brm(family = gaussian, data = df,
           formula = popular ~ 1 + sex + extrav + (1|class),
-          cores = 4, chains = 4)
+          cores = 4, chains = 4,
+          file = mfile)
 
 ```
 
@@ -133,9 +140,12 @@ compare_ic(loo1, loo2)
 
 ```{r}
 
+mfile = "models/pop_tut1_m3"
+
 m3 <- brm(family = gaussian, data = df,
           formula = popular ~ 1 + sex + extrav + texp + (1|class),
-          cores = 4, chains = 4)
+          cores = 4, chains = 4,
+          file = mfile)
 
 ```
 
@@ -144,9 +154,13 @@ m3 <- brm(family = gaussian, data = df,
 Adding random slopes for both predictor variables (sex, extrav)
 ```{r}
 
+mfile = "models/pop_tut1_m4"
+
 m4 <- brm(family = gaussian, data = df,
           formula = popular ~ 1 + sex + extrav + (1 + sex + extrav | class),
-          cores = 4, chains = 4)
+          cores = 4, chains = 4,
+          sample_prior = "yes",
+          file = mfile)
 
 ```
 
@@ -158,18 +172,51 @@ m4 %>%
   spread_draws(b_Intercept, b_sex, b_extrav, r_class[class, sex], r_class[class, extrav])
 
 ```
-
+model with interaction between texp and extrav
 ```{r}
 
+mfile = "models/pop_tut1_m5.rds"
+
+if (file.exists(mfile)) {
+  tryCatch({file.remove(mfile)},
+           error = function(cond) {
+             message(paste0("File doesn't seem to exist: ", mfile))
+             message(cond)
+           },
+           warning = function(cond) {
+             message(paste0("File caused a warning: ", mfile))
+             message(cond)
+           },
+           finally = {
+             message("Deleted the file: ", mfile)
+           })
+}
+
+
+mfile = "models/pop_tut1_m5"
+
 m5 <- brm(family = gaussian, data = df,
-          formula = popular ~ 1 + sex + (1 + sex | class),
-          cores = 4, chains = 4)
+          formula = popular ~ 1 + sex + extrav + texp + extrav:texp + (1 + extrav|class),
+          cores = 4, chains = 4,
+          control = list(adapt_delta = 0.95),
+          iter = 14000, warmup = 13000,
+          sample_prior = "yes",
+          file = mfile)
 
 ```
 
 ```{r}
 
 get_variables(m5)
+
+summary(m5)$fixed
+
+summary(m5)$random
+
+```
+
+
+```{r}
 
 m5 %>%
   spread_draws(b_Intercept, r_class[class, sex])

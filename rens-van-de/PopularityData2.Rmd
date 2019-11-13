@@ -1,0 +1,143 @@
+Source: https://www.rensvandeschoot.com/tutorials/brms-priors/
+
+The idea here is to study the impact of the priors on the models previously built
+
+```{r}
+
+library(brms) # for the analysis
+library(haven) # to load the SPSS .sav file
+library(tidyverse) # needed for data manipulation.
+library(RColorBrewer) # needed for some extra colours in one of the graphs
+library(ggmcmc)
+library(ggthemes)
+library(ggridges)
+library(bayesplot)
+library(tidybayes)
+library(modelr)
+library(gridExtra)
+
+```
+
+
+
+
+```{r}
+
+df <- read_sav(file ="https://github.com/MultiLevelAnalysis/Datasets-third-edition-Multilevel-book/blob/master/chapter%202/popularity/SPSS/popular2.sav?raw=true")
+
+df <- select(popular2data, pupil, class, extrav, sex, texp, popular) # we select just the variables we will use
+head(df) # we have a look at the first 6 observations
+
+df
+
+```
+
+Lets check out the priors that we can specify for the model
+```{r}
+
+get_prior(popular ~ 0 + intercept + sex + extrav + texp + extrav:texp + (1 + extrav | class), data = df)
+get_prior(popular ~ 1 + sex + extrav + texp + extrav:texp + (1 + extrav | class), data = df)
+
+```
+
+Setting the prior
+```{r}
+
+prior1 <- c(set_prior("normal(-10, 100)", class = "b", coef = "extrav"),
+            set_prior("normal(10, 100)", class = "b", coef = "extrav:texp"),
+            set_prior("normal(-5, 100)", class = "b", coef = "sex"),
+            set_prior("normal(-5, 100)", class = "b", coef = "texp"),
+            set_prior("normal(10, 100)", class = "b", coef = "intercept"))
+
+```
+
+Building the model
+```{r}
+
+mfile <- "models/pop_tut2_m1"
+
+m1 <- brm(popular ~ 0 + intercept + sex + extrav + texp + extrav:texp + (1 + extrav | class),
+          data = df, prior = prior1,
+          warmup = 1500, iter = 2000,
+          cores = 4, chains = 4,
+          sample_prior = T,
+          control = list(adapt_delta = 0.97),
+          file = mfile)
+
+```
+
+```{r}
+get_variables(m1)
+
+stancode(m1)
+
+prior_summary(m1)
+```
+
+A bit more informative priors
+```{r}
+
+prior2 <- c(set_prior("normal(0.8, 0.1)", class = "b", coef = "extrav"),
+            set_prior("normal(-0.025, 0.1)", class = "b", coef = "extrav:texp"),
+            set_prior("normal(1.25, 0.1)", class = "b", coef = "sex"),
+            set_prior("normal(.23, .1)", class = "b", coef = "texp"),
+            set_prior("normal(-1.21, .1)", class = "b", coef = "intercept"))
+
+```
+
+Building the model
+```{r}
+
+mfile <- "models/pop_tut2_m2"
+
+m2 <- brm(popular ~ 0 + intercept + sex + extrav + texp + extrav:texp + (1 + extrav | class),
+          data = df, prior = prior2,
+          warmup = 1500, iter = 2000,
+          cores = 4, chains = 4,
+          sample_prior = T,
+          control = list(adapt_delta = 0.97),
+          file = mfile)
+
+```
+
+```{r}
+
+summary(m1)
+
+summary(m2)
+
+```
+
+Adding a highly informative prior but far from the observed data
+
+```{r}
+
+prior3  <- c(set_prior("normal(3, 1)", class = "b", coef = "extrav"),
+            set_prior("normal(-3, 1)", class = "b", coef = "extrav:texp"),
+            set_prior("normal(3, 1)", class = "b", coef = "sex"),
+            set_prior("normal(3, 1)", class = "b", coef = "texp"),
+            set_prior("normal(0, 5)", class = "b", coef = "intercept"))
+
+```
+
+Building the model
+```{r}
+
+mfile <- "models/pop_tut2_m3"
+
+m3 <- brm(popular ~ 0 + intercept + sex + extrav + texp + extrav:texp + (1 + extrav | class),
+          data = df, prior = prior3,
+          warmup = 1500, iter = 2000,
+          cores = 4, chains = 4,
+          sample_prior = T,
+          control = list(adapt_delta = 0.97),
+          file = mfile)
+
+```
+
+```{r}
+
+
+
+```
+
