@@ -1,0 +1,68 @@
+```{r}
+
+library(rethinking)
+data(chimpanzees)
+d <- chimpanzees
+
+rm(chimpanzees)
+detach(package:rethinking, unload = T)
+library(brms)
+
+```
+
+Dataset information
+* actor : name of actor
+* recipient : name of recipient (NA for partner absent condition)
+* condition : partner absent (0), partner present (1)
+* block : block of trials (each actor x each recipient 1 time)
+* trial : trial number (by chimp = ordinal sequence of trials for each chimp, ranges from 1-72; partner present trials were interspersed with partner absent trials)
+* prosocial_left : 1 if prosocial (1/1) option was on left; 0 === 2 food items present on right side & 1 === prosocail option present on left
+* chose_prosoc : choice chimp made (0 = 1/0 option, 1 = 1/1 option)
+* pulled_left : which side did chimp pull (1 = left, 0 = right)
+
+We are trying to study if the chimpanzee pulled the left level when food as present and a pro-social option existed.
+
+There are four combinations:
+(1) prosoc_left= 0 and condition= 0: Two food items on right and no partner.
+(2) prosoc_left= 1 and condition= 0: Two food items on left and no partner.
+(3) prosoc_left= 0 and condition= 1: Two food items on right and partner present.
+(4) prosoc_left= 1 and condition= 1: Two food items on left and partner presen
+
+```{r}
+
+d$treatment <- 1 + d$prosoc_left + 2 * d$condition
+d
+```
+
+The question that we will now try to model here is whether the left level was pulled based on the treatment and the actor.
+
+L ~ Binomial(1, p)
+p ~ actor[i] = treatment[i]
+
+Setting the priors for the model
+```{r}
+
+get_prior(data = d, formula = pulled_left | trials(1) ~ 1, family =binomial)
+
+```
+
+An intercept only simple binomial model
+
+```{r}
+
+mfile <- "models/chimp_m1"
+
+# file.remove(paste0(mfile, ".rds"))
+
+priors <- prior(normal(0,10), class = Intercept)
+
+bm <- brm(data = d, family = binomial,
+          formula = pulled_left | trials(1) ~ 1,
+          sample_prior = T, prior = priors,
+          cores = 4, chains = 4,
+          file = mfile)
+
+
+```
+
+
