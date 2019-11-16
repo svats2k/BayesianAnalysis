@@ -1,4 +1,6 @@
-```{r}
+```{r, include=F, echo=F}
+
+source("../init_settings.R")
 
 library(rethinking)
 data(chimpanzees)
@@ -50,19 +52,122 @@ An intercept only simple binomial model
 
 ```{r}
 
-mfile <- "models/chimp_m1"
+mfile <- "models/chimp_bm_test1"
 
 # file.remove(paste0(mfile, ".rds"))
 
 priors <- prior(normal(0,10), class = Intercept)
 
-bm <- brm(data = d, family = binomial,
+bm_test1 <- brm(data = d, family = binomial,
           formula = pulled_left | trials(1) ~ 1,
           sample_prior = T, prior = priors,
           cores = 4, chains = 4,
           file = mfile)
 
+mfile <- "models/chimp_bm_test2"
+
+# file.remove(paste0(mfile, ".rds"))
+
+priors <- prior(normal(0,1.5), class = Intercept)
+
+bm_test2 <- brm(data = d, family = binomial,
+          formula = pulled_left | trials(1) ~ 1,
+          sample_prior = T, prior = priors,
+          cores = 4, chains = 4,
+          file = mfile)
+
+```
+
+Priot to building the model, what does the model think is plausible?
+```{r}
+
+p1 <- prior_samples(bm_test1) %>% 
+  inv_logit_scaled() %>%
+  ggplot(aes(x = Intercept)) + geom_density()
+
+p2 <- prior_samples(bm_test2) %>% 
+  inv_logit_scaled() %>%
+  ggplot(aes(x = Intercept)) + geom_density()
+
+grid.arrange(p1, p2, nrow = 1)
+```
+
+Adding the treatment column
+
+Identifying the priors
+```{r}
+
+get_prior(family = binomial, data = d, formula = pulled_left | trials(1) ~ 1 + treatment)
 
 ```
 
 
+```{r}
+
+mfile <- "models/chimp_m11.2"
+
+# file.remove(paste0(mfile, ".rds"))
+
+priors <- c(prior(normal(0, 1.5), class = Intercept),
+            prior(normal(0, 10), class = b, coef = "treatment"))
+
+bm_11.2 <- brm(data = d, family = binomial,
+          formula = pulled_left | trials(1) ~ 1 + treatment,
+          sample_prior = T, prior = priors,
+          cores = 4, chains = 4,
+          file = mfile)
+
+
+mfile <- "models/chimp_m11.3"
+
+# file.remove(paste0(mfile, ".rds"))
+
+priors <- c(prior(normal(0, 1.5), class = Intercept),
+            prior(normal(0, 0.5), class = b, coef = "treatment"))
+
+bm_11.3 <- brm(data = d, family = binomial,
+          formula = pulled_left | trials(1) ~ 1 + treatment,
+          sample_prior = T, prior = priors,
+          cores = 4, chains = 4,
+          file = mfile)
+
+```
+
+```{r}
+
+p1 <- prior_samples(bm_11.2) %>%
+  mutate(preds = inv_logit_scaled(b + Intercept)) %>%
+  ggplot(aes(x = preds)) + geom_density()
+  
+p2 <- prior_samples(bm_11.3) %>%
+  mutate(preds = inv_logit_scaled(b + Intercept)) %>%
+  ggplot(aes(x = preds)) + geom_density()
+
+grid.arrange(p1, p2, nrow =1)
+
+```
+
+Considering both actor and treatment
+
+```{r}
+
+mfile <- "models/chimp_m11.4"
+
+# file.remove(paste0(mfile, ".rds"))
+
+priors <- c(prior(normal(0, 1.5), class = Intercept),
+            prior(normal(0, 0.5), class = b, coef = "treatment"),
+            prior(normal(0, 1.5), class = b, coef = "actor"))
+
+bm_11.4 <- brm(data = d, family = binomial,
+          formula = pulled_left | trials(1) ~ 1 + actor + treatment,
+          sample_prior = T, prior = priors,
+          cores = 4, chains = 4,
+          file = mfile)
+
+```
+
+```{r}
+
+
+```
