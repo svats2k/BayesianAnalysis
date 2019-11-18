@@ -33,6 +33,11 @@ There are four combinations:
 ```{r}
 
 d$treatment <- 1 + d$prosoc_left + 2 * d$condition
+d$treatment <- as.factor(d$treatment)
+d$pulled_left <- as.factor(d$pulled_left)
+d$actor <- as.factor(d$actor)
+d$block <- as.factor(d$block)
+
 d
 ```
 
@@ -108,25 +113,27 @@ mfile <- "models/chimp_m11.2"
 
 # file.remove(paste0(mfile, ".rds"))
 
-priors <- c(prior(normal(0, 1.5), class = Intercept),
-            prior(normal(0, 10), class = b, coef = "treatment"))
+get_prior(data = d, family = binomial,
+          formula = pulled_left | trials(1) ~ 1 + treatment)
 
-bm_11.2 <- brm(data = d, family = binomial,
-          formula = pulled_left | trials(1) ~ 1 + treatment,
+priors <- c(prior(normal(0, 1.5), class = Intercept),
+            prior(normal(0, 10), class = b))
+
+bm_11.2 <- brm(data = d, family = bernoulli,
+          formula = pulled_left ~ 1 + treatment,
           sample_prior = T, prior = priors,
           cores = 4, chains = 4,
           file = mfile)
 
 
 mfile <- "models/chimp_m11.3"
-
 # file.remove(paste0(mfile, ".rds"))
 
 priors <- c(prior(normal(0, 1.5), class = Intercept),
-            prior(normal(0, 0.5), class = b, coef = "treatment"))
+            prior(normal(0, 0.5), class = b))
 
-bm_11.3 <- brm(data = d, family = binomial,
-          formula = pulled_left | trials(1) ~ 1 + treatment,
+bm_11.3 <- brm(data = d, family = bernoulli,
+          formula = pulled_left ~ 1 + treatment,
           sample_prior = T, prior = priors,
           cores = 4, chains = 4,
           file = mfile)
@@ -151,16 +158,29 @@ Considering both actor and treatment
 
 ```{r}
 
-mfile <- "models/chimp_m11.4"
 
+# priors <- c(prior(normal(0, 0.5), class = b, coef = treatment2),
+#              prior(normal(0, 0.5), class = b, coef = treatment3),
+#              prior(normal(0, 0.5), class = b, coef = treatment4),
+#              prior(normal(0, 1.5), class = b, coef = actor1),
+#             prior(normal(0, 1.5), class = b, coef = actor2),
+#             prior(normal(0, 1.5), class = b, coef = actor3),
+#             prior(normal(0, 1.5), class = b, coef = actor4),
+#             prior(normal(0, 1.5), class = b, coef = actor5),
+#             prior(normal(0, 1.5), class = b, coef = actor6),
+#             prior(normal(0, 1.5), class = b, coef = actor7))
+
+
+mfile <- "models/chimp_m11.4"
 # file.remove(paste0(mfile, ".rds"))
 
-priors <- c(prior(normal(0, 1.5), class = Intercept),
-            prior(normal(0, 0.5), class = b, coef = "treatment"),
-            prior(normal(0, 1.5), class = b, coef = "actor"))
+get_prior(data = d, family = bernoulli,
+          formula = pulled_left ~ 0 + actor + treatment)
 
-bm_11.4 <- brm(data = d, family = binomial,
-          formula = pulled_left | trials(1) ~ 1 + actor + treatment,
+priors <- c(prior(normal(0, 0.5), class = b))
+
+bm_11.4 <- brm(data = d, family = bernoulli,
+          formula = pulled_left ~ 1 + actor + treatment,
           sample_prior = T, prior = priors,
           cores = 4, chains = 4,
           file = mfile)
@@ -169,5 +189,172 @@ bm_11.4 <- brm(data = d, family = binomial,
 
 ```{r}
 
+d %>%
+  data_grid(actor, treatment) %>%
+  add_fitted_draws(bm_11.4) %>%
+  median_qi(.value) %>%
+  ggplot(aes(x = .value, y = treatment)) + geom_pointintervalh() + facet_wrap(actor~.)
+
+d %>%
+  data_grid(actor, treatment) %>%
+  add_predicted_draws(bm_11.4) %>%
+  median_qi(.prediction) %>%
+  ggplot(aes(x = .prediction, y = treatment)) + geom_pointintervalh() + facet_wrap(actor~.)
+
+
+```
+
+```{r}
+
+mfile <- "models/chimp_m11.5"
+# file.remove(paste0(mfile, ".rds"))
+
+get_prior(data = d, family = bernoulli,
+          formula = pulled_left ~ 1 + (1|actor) + (1|treatment))
+
+bm_11.5 <- brm(data = d, family = bernoulli,
+          formula = pulled_left ~ 1 + (1|actor) + (1|treatment),
+          sample_prior = T, #prior = priors,
+          cores = 4, chains = 4,
+          control = list(adapt_delta = 0.95),
+          file = mfile)
+
+
+```
+
+
+
+```{r}
+
+bm_11.5 %>%
+  spread_draws(b_Intercept, r_actor[actor, ], r_treatment[treatment, ]) %>%
+  median_qi(preds = inv_logit_scaled(b_Intercept + r_actor + r_treatment)) %>%
+  ggplot(aes(x = preds, y = treatment)) + geom_pointintervalh() + facet_wrap(actor~.)
+
+```
+
+```{r, fig.width=12}
+p1 <- d %>%
+        data_grid(actor, treatment) %>%
+        add_fitted_draws(bm_11.4) %>%
+        median_qi(.value) %>%
+        ggplot(aes(x = .value, y = treatment)) + geom_pointintervalh() + facet_wrap(actor~.) +
+          ggtitle("Fixed Effects model")
+
+p2 <- d %>%
+        data_grid(actor, treatment) %>%
+        add_fitted_draws(bm_11.5) %>%
+        median_qi(.value) %>%
+        ggplot(aes(x = .value, y = treatment)) + geom_pointintervalh() + facet_wrap(actor~.) +
+          ggtitle("Random effects model")
+
+grid.arrange(p1, p2, nrow = 1)
+```
+
+
+Actor only model
+```{r}
+
+mfile <- "models/chimp_m11.2a"
+
+# file.remove(paste0(mfile, ".rds"))
+
+# d$actor <- as.factor(d$actor)
+
+get_prior(data = d, family = bernoulli,
+          # formula = pulled_left | trials(1) ~ 1 + actor,
+          formula = pulled_left ~ 1 + actor)
+
+priors <- c(prior(normal(0, 1.5), class = Intercept),
+            prior(normal(0, 0.5), class = b))
+
+bm_11.2a <- brm(data = d, family = bernoulli,
+          # formula = pulled_left | trials(1) ~ 1 + actor,
+          formula = pulled_left ~ 1 + actor,
+          sample_prior = T, prior = priors,
+          cores = 4, chains = 4,
+          file = mfile)
+
+```
+
+pull left behavior of different actors
+
+```{r}
+
+d %>%
+  select(actor, pulled_left) %>%
+  ggplot(aes(y = pulled_left, x = factor(actor))) + geom_boxplot()
+
+
+```
+
+
+```{r}
+
+bm_11.2a$formula
+bm_11.2a$family
+
+prior_samples(bm_11.2a)
+posterior_samples(bm_11.2a)
+
+
+d %>%
+  data_grid(actor) %>%
+  add_predicted_draws(bm_11.2a) %>%
+  # filter(actor == 2) %>%
+  ggplot(aes(x = .prediction, group = actor, col = factor(actor))) + geom_density()
+
+d %>%
+  data_grid(actor) %>%
+  add_fitted_draws(bm_11.2a) %>%
+  # mutate(.value = inv_logit_scaled(.value)) %>%
+  ggplot(aes(x = .value, group = actor, col = factor(actor))) + geom_density()
+
+
+bm_11.2a%>%
+  spread_draws()
+
+```
+
+Rethinking model
+```{r}
+
+dat_list <- list(
+  pulled_left = d$pulled_left,
+  actor = d$actor,
+  treatment = as.integer(d$treatment)
+)
+
+m11.4 <- ulam(
+  alist(
+    pulled_left ~ dbinom( 1 , p ) ,
+    logit(p) <- a[actor] + b[treatment] ,
+    a[actor] ~ dnorm( 0 , 1.5 ),
+    b[treatment] ~ dnorm( 0 , 0.5 )
+  ) , data=dat_list , chains=4 )
+
+```
+
+
+```{r}
+
+plot(precis(as.data.frame(inv_logit(extract.samples(m11.4)$a))), xlim = c(0,1))
+
+```
+
+```{r}
+
+m11.5 <- ulam(
+  alist(
+    pulled_left ~ dbinom( 1 , p ) ,
+    logit(p) <- a[actor],
+    a[actor] ~ dnorm( 0 , 1.5 )
+  ) , data=dat_list , chains=4 )
+
+```
+
+```{r}
+
+precis(as.data.frame(inv_logit(extract.samples(m11.5)$a)))
 
 ```
