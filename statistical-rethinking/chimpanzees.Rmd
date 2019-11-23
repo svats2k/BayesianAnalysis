@@ -38,7 +38,30 @@ d$pulled_left <- as.factor(d$pulled_left)
 d$actor <- as.factor(d$actor)
 d$block <- as.factor(d$block)
 
-d
+d %>%
+  mutate(pulled_left = as.integer(pulled_left) - 1) %>%
+  group_by(actor, treatment) %>%
+  summarise(pulled_left_frac = sum(pulled_left),
+            n())
+
+d %>% mutate(pulled_left = as.integer(pulled_left))
+
+d %>% filter(actor == 1, treatment == 1) %>% summarise(sum(as.integer(pulled_left)))
+
+d %>%
+  group_by(actor, treatment) %>%
+  summarise(pulled_left_frac = sum(as.integer(pulled_left) - 1)/n()) %>%
+    ggplot(aes(x = pulled_left_frac, y = treatment)) + geom_point() + facet_wrap(actor~.) + ggtitle("actor ~ treatment")
+
+d %>%
+  group_by(actor, treatment, block) %>%
+  summarise(pulled_left_frac = sum(as.integer(pulled_left) - 1)/n()) %>%
+  ggplot(aes(x = pulled_left_frac, y = treatment)) +
+    geom_point() +
+    facet_grid(block ~ actor) + 
+    ggtitle("block(y) ~ actor(x)") +
+    theme(axis.text.x = element_text(hjust = 1, angle = 45))
+
 ```
 
 The question that we will now try to model here is whether the left level was pulled based on the treatment and the actor.
@@ -87,12 +110,12 @@ Priot to building the model, what does the model think is plausible?
 ```{r}
 
 p1 <- prior_samples(bm_test1) %>% 
-  inv_logit_scaled() %>%
-  ggplot(aes(x = Intercept)) + geom_density()
+        inv_logit_scaled() %>%
+        ggplot(aes(x = Intercept)) + geom_density()
 
 p2 <- prior_samples(bm_test2) %>% 
-  inv_logit_scaled() %>%
-  ggplot(aes(x = Intercept)) + geom_density()
+        inv_logit_scaled() %>%
+        ggplot(aes(x = Intercept)) + geom_density()
 
 grid.arrange(p1, p2, nrow = 1)
 ```
@@ -143,14 +166,131 @@ bm_11.3 <- brm(data = d, family = bernoulli,
 ```{r}
 
 p1 <- prior_samples(bm_11.2) %>%
-  mutate(preds = inv_logit_scaled(b + Intercept)) %>%
-  ggplot(aes(x = preds)) + geom_density()
+        mutate(preds = inv_logit_scaled(b + Intercept)) %>%
+        ggplot(aes(x = preds)) + geom_density()
   
 p2 <- prior_samples(bm_11.3) %>%
-  mutate(preds = inv_logit_scaled(b + Intercept)) %>%
-  ggplot(aes(x = preds)) + geom_density()
+        mutate(preds = inv_logit_scaled(b + Intercept)) %>%
+        ggplot(aes(x = preds)) + geom_density()
 
 grid.arrange(p1, p2, nrow =1)
+
+```
+
+
+```{r}
+
+d %>%
+  data_grid(treatment) %>%
+  add_fitted_draws(bm_11.2) %>%
+  median_qi(.value) %>%
+  ggplot(aes(x = .value, y = treatment, xmin = .lower, xmax = .upper)) + geom_pointintervalh()
+
+```
+
+Considering the behavior of the actor only
+
+```{r}
+
+mfile <- "models/bm_a1"
+# file.remove(paste0(mfile, ".rds"))
+
+get_prior(family = bernoulli, data = d,
+             formula = pulled_left ~ 1 + actor)
+
+priors <- c(prior(normal(0, 1.5), class = Intercept),
+            prior(normal(0, 10.5), class = b))
+
+bm_a1 <- brm(family = bernoulli, data = d,
+             formula = pulled_left ~ 1 + actor,
+             sample_prior = T, prior = priors,
+             cores = 4, chains = 4,
+             control = list(max_treedepth = 15),
+             file = mfile)
+
+
+```
+
+```{r}
+
+prior_samples(bm_a1) %>%
+  inv_logit_scaled() %>%
+  ggplot(aes(x = Intercept)) + geom_density()
+
+```
+
+```{r}
+
+d %>%
+  data_grid(actor) %>%
+  add_fitted_draws(bm_a1) %>%
+  median_qi(.value) %>%
+  ggplot(aes(x = .value, y = actor, xmin = .lower, xmax = .upper)) + geom_pointintervalh()
+
+
+```
+
+
+```{r}
+
+mfile <- "models/bm_a1_h"
+# file.remove(paste0(mfile, ".rds"))
+
+get_prior(family = bernoulli, data = d,
+             formula = pulled_left ~ 1 + (1|actor))
+
+priors <- c(prior(normal(0, 1.5), class = Intercept))
+
+bm_a1_h <- brm(family = bernoulli, data = d,
+             formula = pulled_left ~ 1 + (1|actor),
+             sample_prior = T, prior = priors,
+             cores = 4, chains = 4,
+             control = list(max_treedepth = 15),
+             file = mfile)
+
+
+```
+
+```{r}
+
+p1 <- d %>%
+  data_grid(actor) %>%
+  add_fitted_draws(bm_a1) %>%
+  median_qi(.value) %>%
+  ggplot(aes(x = .value, y = actor, xmin = .lower, xmax = .upper)) + geom_pointintervalh() + ggtitle("Fixed Effects Model")
+
+p2 <- d %>%
+  data_grid(actor) %>%
+  add_fitted_draws(bm_a1_h) %>%
+  median_qi(.value) %>%
+  ggplot(aes(x = .value, y = actor, xmin = .lower, xmax = .upper)) + geom_pointintervalh() + ggtitle("Random Effects Model")
+
+grid.arrange(p1, p2, nrow = 1)
+
+```
+
+```{r, fig.width=12}
+
+d1 <- d %>%
+  data_grid(actor) %>%
+  add_fitted_draws(bm_a1) %>%
+  ungroup() %>%
+  select(actor, .value) %>%
+  as_tibble() %>%
+  mutate(type = "fixed")
+
+d2 <- d %>%
+  data_grid(actor) %>%
+  add_fitted_draws(bm_a1_h) %>%
+  ungroup() %>%
+  select(actor, .value) %>%
+  as_tibble() %>%
+  mutate(type = "random")
+
+d3 <- rbind(d1, d2)
+
+d3 %>%
+  ggplot(aes(x = .value, col = type)) + geom_density(alpha=0.2, aes(fill = type)) + facet_wrap(actor~., scales = "free")
 
 ```
 
@@ -222,8 +362,6 @@ bm_11.5 <- brm(data = d, family = bernoulli,
 
 ```
 
-
-
 ```{r}
 
 bm_11.5 %>%
@@ -234,6 +372,7 @@ bm_11.5 %>%
 ```
 
 ```{r, fig.width=12}
+
 p1 <- d %>%
         data_grid(actor, treatment) %>%
         add_fitted_draws(bm_11.4) %>%
@@ -249,6 +388,7 @@ p2 <- d %>%
           ggtitle("Random effects model")
 
 grid.arrange(p1, p2, nrow = 1)
+
 ```
 
 
@@ -279,15 +419,6 @@ bm_11.2a <- brm(data = d, family = bernoulli,
 
 pull left behavior of different actors
 
-```{r}
-
-d %>%
-  select(actor, pulled_left) %>%
-  ggplot(aes(y = pulled_left, x = factor(actor))) + geom_boxplot()
-
-
-```
-
 
 ```{r}
 
@@ -310,51 +441,6 @@ d %>%
   # mutate(.value = inv_logit_scaled(.value)) %>%
   ggplot(aes(x = .value, group = actor, col = factor(actor))) + geom_density()
 
-
-bm_11.2a%>%
-  spread_draws()
-
-```
-
-Rethinking model
-```{r}
-
-dat_list <- list(
-  pulled_left = d$pulled_left,
-  actor = d$actor,
-  treatment = as.integer(d$treatment)
-)
-
-m11.4 <- ulam(
-  alist(
-    pulled_left ~ dbinom( 1 , p ) ,
-    logit(p) <- a[actor] + b[treatment] ,
-    a[actor] ~ dnorm( 0 , 1.5 ),
-    b[treatment] ~ dnorm( 0 , 0.5 )
-  ) , data=dat_list , chains=4 )
-
 ```
 
 
-```{r}
-
-plot(precis(as.data.frame(inv_logit(extract.samples(m11.4)$a))), xlim = c(0,1))
-
-```
-
-```{r}
-
-m11.5 <- ulam(
-  alist(
-    pulled_left ~ dbinom( 1 , p ) ,
-    logit(p) <- a[actor],
-    a[actor] ~ dnorm( 0 , 1.5 )
-  ) , data=dat_list , chains=4 )
-
-```
-
-```{r}
-
-precis(as.data.frame(inv_logit(extract.samples(m11.5)$a)))
-
-```
