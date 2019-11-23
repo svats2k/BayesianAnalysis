@@ -57,6 +57,44 @@ Building an intercept only model
 
 ```{r}
 
+m1 <- brm(
+  data = df, family = gaussian,
+  formula = popular ~ 1 + extrav,
+  chains = 4, cores = 4)
+
+
+```
+
+
+
+
+```{r}
+
+m1
+
+```
+
+```{r}
+
+
+mcmc_trace(m1)
+
+p1 <- df %>%
+  data_grid(extrav) %>%
+  add_fitted_draws(m1) %>%
+  ggplot(aes(x = factor(extrav), y = .value)) + geom_boxplot()
+  
+p2 <- df %>%
+  data_grid(extrav) %>%
+  add_predicted_draws(m1) %>%
+  ggplot(aes(x = factor(extrav), y = .prediction)) + geom_boxplot()
+
+grid.arrange(p1, p2, nrow=1)
+
+```
+
+```{r}
+
 mfile = "models/pop_tut1_m1"
 
 m1 <- brm(

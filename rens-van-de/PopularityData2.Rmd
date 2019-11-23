@@ -25,7 +25,7 @@ library(gridExtra)
 
 df <- read_sav(file ="https://github.com/MultiLevelAnalysis/Datasets-third-edition-Multilevel-book/blob/master/chapter%202/popularity/SPSS/popular2.sav?raw=true")
 
-df <- select(popular2data, pupil, class, extrav, sex, texp, popular) # we select just the variables we will use
+df <- select(df, pupil, class, extrav, sex, texp, popular) # we select just the variables we will use
 head(df) # we have a look at the first 6 observations
 
 df
@@ -136,8 +136,18 @@ m3 <- brm(popular ~ 0 + intercept + sex + extrav + texp + extrav:texp + (1 + ext
 ```
 
 ```{r}
+summary(m1)
+summary(m2)
+summary(m3)
 
+```
 
+```{r}
 
+plot(hypothesis(m1, "texp > 0"))
+plot(hypothesis(m2, "texp > 0"))
+plot(hypothesis(m3, "texp > 10"))
+
+plot(hypothesis(m1, "intercept > 0"))
 ```
 
