@@ -443,4 +443,21 @@ d %>%
 
 ```
 
+Studying contrasts
+
+```{r}
+
+get_variables(bm_11.4)
+
+bm_11.4 %>%
+  spread_draws(b_Intercept, b_treatment2, b_treatment3, b_treatment4) %>%
+  mutate(db13 = b_Intercept - b_treatment3,
+         db24 = b_treatment2 - b_treatment4) %>%
+  select(db13, db24) %>%
+  summary()
+
+```
+
+
+
 
