@@ -1,0 +1,103 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, echo=F, include=FALSE}
+
+source("../init_settings.R")
+
+library(rethinking)
+data("UCBAdmissions")
+d <- UCBAdmissions
+d <- as.data.frame(d)
+
+rm(UCBAdmissions)
+detach(package:rethinking, unload = T)
+library(brms)
+
+```
+
+```{r}
+d
+
+d %>%
+  pivot_wider(names_from = c(Admit, Gender), values_from = Freq) %>%
+  mutate(perc_admit_male = Admitted_Male / (Admitted_Male + Rejected_Male),
+         perc_admit_female = Admitted_Female / (Admitted_Female + Rejected_Female),
+         perc_admit_overall = (Admitted_Male + Admitted_Female) / (Admitted_Male + Rejected_Male + Admitted_Female + Rejected_Female),
+         perc_male_admit = Admitted_Male / (Admitted_Male + Admitted_Female)) %>%
+  mutate_at(vars(starts_with("perc_")), ~round(., digits = 2))
+
+d %>%
+  summarise_if(is.numeric, sum)
+
+
+
+```
+
+Checking if there is a bias overall
+
+```{r}
+
+d_m1 <- d %>%
+          pivot_wider(names_from = c(Admit), values_from = Freq) %>%
+          mutate(applications = Admitted + Rejected)
+d_m1
+```
+
+```{r}
+
+mfile <- "models/gsa_m1_defp"
+
+# file.remove(paste0(mfile, ".rds"))
+# get_prior(data = d_m1, family = binomial, prior = priors,
+#           formula = Admitted | trials(applications) ~ 0 + Gender)
+
+gsa_m1_defp <- brm(data = d_m1, family = binomial,
+              formula = Admitted | trials(applications) ~ 1 + Gender,
+              chains = 4, cores = 4,
+              sample_prior = T,
+              file = mfile)
+
+```
+
+```{r}
+mfile <- "models/gsa_m1_regp"
+
+file.remove(paste0(mfile, ".rds"))
+# get_prior(data = d_m1, family = binomial, prior = priors,
+#           formula = Admitted | trials(applications) ~ 0 + Gender)
+
+priors <- c(prior(normal(0,1.5), class = b))
+
+gsa_m1_regp <- brm(data = d_m1, family = binomial,
+              formula = Admitted | trials(applications) ~ 0 + Gender,
+              chains = 4, cores = 4,
+              sample_prior = T, prior = priors,
+              file = mfile)
+
+```
+
+
+Prior predictive simulations
+
+```{r}
+
+gsa_m1_defp
+
+p1 <- prior_samples(gsa_m1_defp) %>%
+  inv_logit_scaled() %>%
+  ggplot(aes(x = b)) + geom_density()
+
+p2 <- prior_samples(gsa_m1_regp) %>%
+  inv_logit_scaled() %>%
+  ggplot(aes(x = b)) + geom_density()
+
+grid.arrange(p1, p2, nrow = 1)
+
+```
+
+
+
+
