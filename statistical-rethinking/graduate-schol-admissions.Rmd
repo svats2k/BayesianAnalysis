@@ -19,7 +19,6 @@ library(brms)
 ```
 
 ```{r}
-d
 
 d %>%
   pivot_wider(names_from = c(Admit, Gender), values_from = Freq) %>%
@@ -29,11 +28,7 @@ d %>%
          perc_male_admit = Admitted_Male / (Admitted_Male + Admitted_Female)) %>%
   mutate_at(vars(starts_with("perc_")), ~round(., digits = 2))
 
-d %>%
-  summarise_if(is.numeric, sum)
-
-
-
+d
 ```
 
 Checking if there is a bias overall
@@ -49,10 +44,10 @@ d_m1
 ```{r}
 
 mfile <- "models/gsa_m1_defp"
-
 # file.remove(paste0(mfile, ".rds"))
+
 # get_prior(data = d_m1, family = binomial, prior = priors,
-#           formula = Admitted | trials(applications) ~ 0 + Gender)
+#           formula = Admitted | trials(applications) ~ 1 + Gender)
 
 gsa_m1_defp <- brm(data = d_m1, family = binomial,
               formula = Admitted | trials(applications) ~ 1 + Gender,
@@ -62,17 +57,61 @@ gsa_m1_defp <- brm(data = d_m1, family = binomial,
 
 ```
 
+mcmc traces
+```{r}
+
+mcmc_trace(gsa_m1_defp)
+mcmc_dens(gsa_m1_defp)
+
+```
+
+
+Prior simulations
+```{r}
+
+prior_samples(gsa_m1_defp) %>%
+  inv_logit_scaled() %>%
+  ggplot(aes(x = Intercept)) + geom_density()
+
+```
+
+Posterior predictive checks
+
+```{r}
+
+d_m1 %>%
+  data_grid(Gender, applications) %>%
+  add_predicted_draws(gsa_m1_defp) %>%
+  median_qi() %>%
+  ggplot(aes(x = .prediction, y = applications, xmax = .upper, xmin = .lower, col = Gender)) + geom_pointintervalh()
+
+gsa_m1_defp %>%
+  spread_draws(b_Intercept, b_GenderFemale) %>%
+  transmute(Male_prob = b_Intercept,
+            Female_prob = b_Intercept + b_GenderFemale) %>%
+  inv_logit_scaled() %>%
+  gather(prob_types, values) %>%
+  ggplot(aes(x = values, col = prob_types)) + geom_density()
+
+```
+
+
+
 ```{r}
 mfile <- "models/gsa_m1_regp"
+# file.remove(paste0(mfile, ".rds"))
 
-file.remove(paste0(mfile, ".rds"))
 # get_prior(data = d_m1, family = binomial, prior = priors,
-#           formula = Admitted | trials(applications) ~ 0 + Gender)
+#           formula = Admitted | trials(applications) ~ 1 + Gender)
 
-priors <- c(prior(normal(0,1.5), class = b))
+# priors <- c(prior(normal(0,1.5), class = b, coef = "GenderFemale"),
+#             prior(normal(0,1.5), class = Intercept))
+
+priors <- c(prior(normal(0,1.5), class = Intercept))
+
 
 gsa_m1_regp <- brm(data = d_m1, family = binomial,
-              formula = Admitted | trials(applications) ~ 0 + Gender,
+              formula = Admitted | trials(applications) ~ 1 + Gender,
               chains = 4, cores = 4,
               sample_prior = T, prior = priors,
               file = mfile)
@@ -84,20 +123,198 @@ Prior predictive simulations
 
 ```{r}
 
-gsa_m1_defp
-
-p1 <- prior_samples(gsa_m1_defp) %>%
+prior_samples(gsa_m1_regp) %>%
   inv_logit_scaled() %>%
-  ggplot(aes(x = b)) + geom_density()
+  ggplot(aes(x = Intercept)) + geom_density()
+  # gather(ptypes, pvals ) %>%
+  # ggplot(aes(x = pvals, col = ptypes)) + geom_density()
 
-p2 <- prior_samples(gsa_m1_regp) %>%
+d_m1 %>%
+  data_grid(Gender, applications) %>%
+  add_predicted_draws(gsa_m1_regp) %>%
+  ggplot(aes(x = factor(applications), y = .prediction, fill = Gender)) + geom_boxplot()
+
+```
+
+Comparing prediction of regularized priors and default priors
+
+```{r}
+
+regp <- d_m1 %>%
+          data_grid(Gender, applications) %>%
+          add_predicted_draws(gsa_m1_regp) %>%
+          mutate(itype = "regp")
+
+defp <- d_m1 %>%
+          data_grid(Gender, applications) %>%
+          add_predicted_draws(gsa_m1_defp) %>%
+          mutate(itype = "defp")
+
+preds <- regp %>% rbind(defp)
+
+preds %>%
+  ggplot(aes(x = factor(applications), y = .prediction, col = itype)) +
+    geom_boxplot() +
+    facet_grid(Gender~., scales = "free")
+```
+
+Density based comparison
+```{r}
+
+defp <- gsa_m1_defp %>%
+  spread_draws(b_Intercept, b_GenderFemale) %>%
+  transmute(Male_prob = b_Intercept,
+            Female_prob = b_Intercept + b_GenderFemale) %>%
   inv_logit_scaled() %>%
-  ggplot(aes(x = b)) + geom_density()
+  mutate(itype = "defp")
 
-grid.arrange(p1, p2, nrow = 1)
+regp <- gsa_m1_regp %>%
+  spread_draws(b_Intercept, b_GenderFemale) %>%
+  transmute(Male_prob = b_Intercept,
+            Female_prob = b_Intercept + b_GenderFemale) %>%
+  inv_logit_scaled() %>%
+  mutate(itype = "regp")
+
+preds <- defp %>% rbind(regp)
+
+preds %>%
+  gather(gender, probs, -itype) %>%
+  ggplot(aes(x = probs, col = gender, fill = itype)) + geom_density(alpha = 0.2)
 
 ```
 
 
+Regularizartion doesn't seem to have an impact on the predictions
 
+Now analyzing the acceptance rate per group
+
+```{r}
+
+
+
+```
+
+```{r}
+
+mfile <- "models/gsa_m2_defp"
+# file.remove(paste0(mfile, ".rds"))
+
+# get_prior(data = d_m1, family = binomial, prior = priors,
+#           formula = Admitted | trials(applications) ~ 1 + Gender + Dept)
+
+gsa_m2_defp <- brm(data = d_m1, family = binomial,
+              formula = Admitted | trials(applications) ~ 1 + Gender + Dept,
+              chains = 4, cores = 4,
+              sample_prior = T,
+              file = mfile)
+
+```
+
+Checking the priors in the model
+```{r}
+
+prior_samples(gsa_m2_defp) %>%
+  inv_logit_scaled() %>%
+  ggplot(aes(x = Intercept)) + geom_density()
+
+```
+
+
+```{r}
+
+d_m1 %>%
+  data_grid(Gender, Dept, applications) %>%
+  add_predicted_draws(gsa_m2_defp) %>%
+  median_qi(.prediction) %>%
+  ggplot(aes(x = factor(applications), y = .prediction, ymin = .lower, ymax = .upper, col = Gender)) +
+    geom_pointinterval() +
+    facet_grid(Dept~., scales = "free")
+
+d_m1 %>%
+  data_grid(Gender, Dept) %>%
+  mutate(applications = 100) %>%
+  add_predicted_draws(gsa_m2_defp) %>%
+  ggplot(aes(x = .prediction, fill = Gender, col = Gender)) +
+    geom_density(alpha = 0.2) +
+    facet_wrap(Dept~., scales = "free")
+
+```
+
+Using regularising priors
+
+```{r}
+
+mfile <- "models/gsa_m2_regp"
+# file.remove(paste0(mfile, ".rds"))
+
+# get_prior(data = d_m1, family = binomial, prior = priors,
+#           formula = Admitted | trials(applications) ~ 1 + Gender + Dept)
+
+priors <- c(prior(normal(0, 1.5), class = Intercept),
+            prior(normal(0, 0.5), class = b))
+
+gsa_m2_regp <- brm(data = d_m1, family = binomial,
+              formula = Admitted | trials(applications) ~ 1 + Gender + Dept,
+              chains = 4, cores = 4,
+              prior = priors, sample_prior = T,
+              file = mfile)
+
+```
+
+mcmc chains
+```{r}
+
+mcmc_trace(gsa_m2_regp)
+mcmc_dens(gsa_m2_regp)
+
+```
+
+
+Prior simulation
+```{r}
+
+gsa_m2_regp %>%
+  prior_samples() %>%
+  transmute(prior_preds = Intercept + b) %>%
+  inv_logit_scaled() %>%
+  ggplot(aes(x = prior_preds)) + geom_density()
+
+```
+
+```{r}
+
+defp <- d_m1 %>%
+  data_grid(Gender, Dept) %>%
+  mutate(applications = 100) %>%
+  add_predicted_draws(gsa_m2_defp) %>%
+  ungroup() %>%
+  select(Gender, Dept, .prediction) %>%
+  mutate(itype = "defp")
+
+regp <- d_m1 %>%
+  data_grid(Gender, Dept) %>%
+  mutate(applications = 100) %>%
+  add_predicted_draws(gsa_m2_regp) %>%
+  ungroup() %>%
+  select(Gender, Dept, .prediction, -.row) %>%
+  mutate(itype = "regp")
+  
+
+preds <- rbind(defp, regp)
+preds
+
+preds %>%
+  ggplot(aes(x = .prediction, fill = itype, col = itype)) +
+    geom_density(alpha = 0.2) +
+    facet_wrap(Dept~Gender, scales = "free")  
+
+d_m1 %>%
+  data_grid(Gender, Dept) %>%
+  mutate(applications = 100) %>%
+  add_predicted_draws(gsa_m2_regp) %>%
+  ggplot(aes(x = .prediction, fill = Gender, col = Gender)) +
+    geom_density(alpha = 0.2) +
+    facet_wrap(Dept~., scales = "free")
+
+```
 
