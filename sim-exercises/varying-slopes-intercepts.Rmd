@@ -1,0 +1,363 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+generate training data
+
+```{r, echo=F, include=F}
+
+source("../init_settings.R")
+
+```
+
+
+```{r}
+n_unq <- 50
+reps <- 3
+
+df <- tibble(
+  x = rep(seq_len(n_unq), reps),
+  y1 = rnorm(n_unq * reps, mean = 5, sd = 2) * x + rnorm(n_unq * reps, mean = 0, sd = 0.5),
+  y2 = rnorm(n_unq * reps, mean = 15, sd = 2) * x + rnorm(n_unq * reps, mean = 0, sd = 0.5),
+  y3 = rnorm(n_unq * reps, mean = 25, sd = 2) * x + rnorm(n_unq * reps, mean = 0, sd = 0.5)
+)
+
+mdf <- df %>%
+  pivot_longer(cols = c(y1, y2, y3), names_to = "srcs", values_to = "y")
+
+
+mu_x <- mean(mdf$x)
+sd_x <- sd(mdf$x)
+
+mu_y <- mean(mdf$y)
+sd_y <- sd(mdf$y)
+
+mdf$scaled_x <- (mdf$x - mu_x) / sd_x
+mdf$scaled_y <- (mdf$y - mu_y) / sd_y
+
+ggplot(mdf, aes(x = x, y = y, col = srcs)) + geom_point() + geom_smooth(method = "lm")
+
+ggplot(mdf, aes(x = x, y = y)) + geom_point() + geom_smooth(method = "lm")
+
+```
+
+Simple regression model
+```{r}
+
+summary(lm(y ~ x, data = mdf))
+
+```
+
+
+```{r}
+
+mfile <- "models/vsi_m0"
+# file.remove(paste0(mfile, ".rds"))
+
+vsi_m0 <- brm(data = mdf, family = gaussian,
+              formula = y ~ 1 + x,
+              sample_prior = T,
+              chains = 4, cores = 4,
+              file = mfile)
+
+```
+
+Assessing vsi_m0, the basic diagnostics first
+1. The variance associated with the slope is very high
+2. The variance parameter is also pretty high ~ 240 - 260
+
+
+```{r}
+
+summary(vsi_m0)
+
+mcmc_dens(vsi_m0)
+
+```
+
+Computing log pointwise density
+
+```{r}
+
+waic(vsi_m0)
+
+```
+
+
+```{r}
+
+lppd <- vsi_m0 %>%
+  log_lik() %>%
+  as_tibble() %>%
+  summarise_all(~mean(.)) %>%
+  unlist() %>% unname()
+
+pWAIC <- vsi_m0 %>%
+  log_lik() %>%
+  as_tibble() %>%
+  summarise_all(~var(.)) %>%
+  unlist() %>% unname()
+
+estimate <- -2*(sum(lppd) - sum(pWAIC))
+
+SE <- sqrt(450 * var(-2*(lppd - pWAIC)))
+
+```
+
+
+
+```{r}
+
+mdf %>%
+  data_grid(x) %>%
+  add_predicted_draws(vsi_m0) %>%
+  ggplot(aes(x = x, y = .prediction)) + geom_point()
+
+mdf %>%
+  data_grid(x) %>%
+  add_fitted_draws(vsi_m0) %>%
+  ggplot(aes(x = x, y = .value)) + geom_point()
+
+ggplot(mdf, aes(x = x, y = y, col = srcs)) + geom_point()
+
+```
+
+PPC checks
+```{r}
+
+pp_check(vsi_m0)
+pp_check(vsi_m0, type = "hist")
+pp_check(vsi_m0, type = "error_hist")
+pp_check(vsi_m0, type = "stat")
+pp_check(vsi_m0, type = "scatter")
+pp_check(vsi_m0, type = "loo_intervals")
+
+```
+
+
+
+```{r}
+
+mfile <- "models/vsi_m1"
+# file.remove(paste0(mfile, ".rds"))
+
+vsi_m1 <- brm(data = mdf, family = gaussian,
+              formula = y ~ 1 + x + srcs,
+              sample_prior = T,
+              chains = 4, cores = 4,
+              file = mfile)
+
+```
+
+First need a way to figure out that the basic model is bad and it can be consistently improved.
+
+```{r}
+
+summary(vsi_m1)
+
+```
+
+```{r}
+
+mcmc_dens(vsi_m1)
+
+```
+
+```{r, fig.width=16, fig.height=6}
+
+pp_check(vsi_m1)
+pp_check(vsi_m1, type = "hist")
+pp_check(vsi_m1, type = "error_hist")
+pp_check(vsi_m1, type = "stat")
+pp_check(vsi_m1, type = "scatter")
+pp_check(vsi_m1, type = "intervals_grouped", group = "srcs")
+
+```
+
+
+```{r}
+
+mdf %>%
+  data_grid(x, srcs) %>%
+  add_predicted_draws(vsi_m1) %>%
+  ggplot(aes(x = x, y = .prediction, col = srcs, position = "jitter")) + geom_jitter(width = 0.25, alpha = 0.01)
+
+```
+
+```{r}
+
+loo_compare(waic(vsi_m0), waic(vsi_m1))
+
+```
+
+
+
+```{r, fig.width=12, fig.height=6}
+p1 <- stanplot(vsi_m0) + ggtitle(vsi_m0$formula)
+p2 <- stanplot(vsi_m1) + ggtitle(vsi_m1$formula)
+
+grid.arrange(p1, p2, nrow = 1)
+```
+
+
+```{r}
+
+mfile <- "models/vsi_m2"
+# file.remove(paste0(mfile, ".rds"))
+
+vsi_m2 <- brm(data = mdf, family = gaussian,
+         formula = y ~ 1 + x + (1|srcs),
+         sample_prior = T,
+         chains = 4, cores = 4,
+         file = mfile)
+
+```
+
+```{r, fig.width=16, fig.height=6}
+
+pp_check(vsi_m2, type = "intervals_grouped", group = "srcs") + ggtitle(vsi_m2$formula)
+pp_check(vsi_m3, type = "intervals_grouped", group = "srcs") + ggtitle(vsi_m3$formula)
+
+```
+
+```{r}
+loo_compare(waic(vsi_m0), waic(vsi_m1), waic(vsi_m2))
+```
+
+
+```{r}
+
+mdf %>%
+  data_grid(x, srcs) %>%
+  add_predicted_draws(vsi_m2) %>%
+  group_by(x, srcs) %>%
+  sample_n(100) %>%
+  ungroup() %>%
+  ggplot(aes(x = x, y = .prediction, col = srcs)) +
+    geom_point() +
+    ggtitle("Predicted Draws")
+
+mdf %>%
+  select(x, srcs) %>%
+  add_fitted_draws(vsi_m2) %>%
+  group_by(x, srcs) %>%
+  sample_n(100) %>%
+  ungroup() %>%
+  ggplot(aes(x = x, y = .value, col = srcs)) +
+    geom_point() +
+    ggtitle("Fitted Draws")
+
+```
+
+```{r}
+
+
+```
+
+
+```{r}
+
+mfile <- "models/vsi_m3"
+# file.remove(paste0(mfile, ".rds"))
+
+vsi_m3 <- brm(data = mdf, family = gaussian,
+            formula = y ~ 1 + (x|srcs),
+            sample_prior = T,
+            cores = 4, chains = 4,
+            file = mfile,
+            control = list(adapt_delta = 0.99,
+                           max_treedepth = 15))
+
+```
+
+
+```{r, fig.width=12, fig.height=6}
+
+p1 <- stanplot(vsi_m3) + ggtitle(vsi_m3$formula)
+p2 <- stanplot(vsi_m4) + ggtitle(vsi_m4$formula)
+
+grid.arrange(p1, p2, nrow = 1)
+
+```
+
+
+
+```{r}
+
+mfile <- "models/vsi_m4"
+# file.remove(paste0(mfile, ".rds"))
+
+vsi_m4 <- brm(data = mdf, family = gaussian,
+            formula = scaled_y ~ 1 + (scaled_x|srcs),
+            sample_prior = T,
+            cores = 4, chains = 4,
+            file = mfile,
+            control = list(adapt_delta = 0.99,
+                           max_treedepth = 15))
+
+```
+
+
+```{r}
+
+vsi_m3$formula
+vsi_m4$formula
+vsi_m5$formula
+
+loo_compare(waic(vsi_m0), waic(vsi_m1), waic(vsi_m2), waic(vsi_m3), waic(vsi_m5))
+
+```
+
+```{r}
+
+mfile <- "models/vsi_m5"
+# file.remove(paste0(mfile, ".rds"))
+
+vsi_m5 <- brm(data = mdf, family = gaussian,
+            formula = y ~ 1 + (scaled_x|srcs),
+            sample_prior = T,
+            cores = 4, chains = 4,
+            file = mfile,
+            control = list(adapt_delta = 0.99,
+                           max_treedepth = 15))
+
+```
+
+```{r}
+
+mcmc_dens(vsi_m5)
+
+```
+
+
+```{r}
+
+pp_check(vsi_m5, type = "intervals_grouped", group = "srcs")
+
+```
+
+```{r}
+
+mdf %>%
+  data_grid(scaled_x, srcs) %>%
+  add_predicted_draws(vsi_m5) %>%
+  group_by(scaled_x, srcs) %>%
+  sample_n(100) %>%
+  ungroup() %>%
+  ggplot(aes(x = scaled_x, y = .prediction, col = srcs)) +
+    geom_point() +
+    ggtitle("Predicted Draws")
+
+mdf %>%
+  select(scaled_x, srcs) %>%
+  add_fitted_draws(vsi_m5) %>%
+  group_by(scaled_x, srcs) %>%
+  sample_n(100) %>%
+  ungroup() %>%
+  ggplot(aes(x = scaled_x, y = .value, col = srcs)) +
+    geom_point() +
+    ggtitle("Fitted Draws")
+
+```
+
