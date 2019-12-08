@@ -1,0 +1,390 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, echo=F, include=F}
+
+source("../init_settings.R")
+
+```
+
+Reading the data set
+
+```{r, echo=F}
+
+library(rethinking)
+data(WaffleDivorce)
+d <- WaffleDivorce
+
+rm(WaffleDivorce)
+detach(package:rethinking, unload = T)
+library(brms)
+library(tidyverse)
+
+```
+
+```{r}
+
+mu_age <- mean(d$MedianAgeMarriage)
+sd_age <- sd(d$MedianAgeMarriage)
+
+mu_d <- mean(d$Divorce)
+sd_d <- sd(d$Divorce)
+
+mu_mr <- mean(d$Marriage)
+sd_mr <- sd(d$Marriage)
+
+d <- d %>% mutate(MedianAgeMarriage_s = (MedianAgeMarriage - mu_age)/ sd_age,
+                  Divorce_s = (Divorce - mu_d) / sd_d,
+                  Marriage_s = (Marriage - mu_mr) / sd_mr)
+
+d
+
+```
+
+# Impact of age on divorce rate
+
+## Simple visualization
+```{r}
+
+d %>%
+  ggplot(aes(x = MedianAgeMarriage_s, y = Divorce_s)) +
+    geom_point() +
+    geom_smooth(method = "lm")
+
+```
+
+Lower the age of marraige, higher the divorce rate
+
+```{r}
+
+mfile <- "models/mra_m1"
+# file.remove(paste0(mfile, ".rds"))
+
+# get_prior(family = gaussian, data = d,
+#           formula = Divorce_s ~ 1 + MedianAgeMarriage_s)
+
+priors <- c(prior(normal(0, 0.5), class = b, coef = "MedianAgeMarriage_s"),
+            prior(normal(0, 0.5), class = Intercept))
+
+mra_m1 <- brm(family = gaussian, data = d,
+          formula = Divorce_s ~ 1 + MedianAgeMarriage_s,
+          cores = 4, chains = 4,
+          sample_prior = T, prior = priors,
+          control = list(max_treedepth = 15),
+          file = mfile)
+
+```
+
+Prior simulations
+```{r}
+
+mcmc_dens(mra_m1)
+mcmc_trace(mra_m1)
+stanplot(mra_m1)
+
+```
+
+```{r}
+
+mra_m1 %>%
+  log_lik() %>%
+  as_tibble(.name_repair = "unique") %>%
+  transmute(lp = rowSums(.)) %>%
+  ggplot(aes(x = lp)) + geom_density()
+
+```
+Prior simulations
+```{r}
+
+posterior_samples(mra_m1) %>%
+  select(prior_Intercept, b_Intercept) %>%
+  pivot_longer(names_to = "Intercept_type", 
+               values_to = "Intercept_values", 
+               cols = c(b_Intercept, prior_Intercept)) %>%
+  ggplot(aes(x = Intercept_values, col = Intercept_type)) +
+    geom_density(aes(fill = Intercept_type), alpha = 0.2) +
+    ggtitle("Compare Intercepts")
+
+posterior_samples(mra_m1) %>%
+  select(prior_b, b_MedianAgeMarriage_s) %>%
+  pivot_longer(names_to = "slope_type", 
+               values_to = "slope_values", 
+               cols = c(prior_b, b_MedianAgeMarriage_s)) %>%
+  ggplot(aes(x = slope_values, col = slope_type)) +
+    geom_density(aes(fill = slope_type), alpha = 0.2) +
+    ggtitle("Compare Slopes")
+
+```
+
+Posterior checks
+```{r}
+pp_check(mra_m1, type = "dens_overlay")
+pp_check(mra_m1, type = "error_hist")
+pp_check(mra_m1, type = "boxplot")
+pp_check(mra_m1, type = "ribbon")
+```
+
+```{r}
+
+d %>%
+  select(MedianAgeMarriage, MedianAgeMarriage_s, Divorce_s, Divorce) %>%
+  add_fitted_draws(mra_m1) %>%
+  mutate(preds = .value * sd_d + mu_d) %>%
+  ggplot(aes(y = preds, x = MedianAgeMarriage)) + geom_point() +
+    geom_point(aes(y = Divorce, x = MedianAgeMarriage), color = "lightblue")
+
+d %>%
+  select(MedianAgeMarriage, MedianAgeMarriage_s, Divorce_s, Divorce) %>%
+  add_predicted_draws(mra_m1) %>%
+  mutate(preds = .prediction * sd_d + mu_d) %>%
+  ggplot() +
+    geom_point(aes(y = preds, x = MedianAgeMarriage)) +
+    geom_point(aes(y = Divorce, x = MedianAgeMarriage), color = "lightblue")
+
+```
+
+
+# Impact of marriage rate on divorce rate
+
+## Simple visualization
+```{r}
+
+d %>%
+  ggplot(aes(x = Marriage_s, y = Divorce_s)) +
+    geom_point() +
+    geom_smooth(method = "lm")
+
+```
+
+Higher the marriage rate, higher the divorce rate
+
+```{r}
+
+mfile <- "models/mra_m2"
+# file.remove(paste0(mfile, ".rds"))
+
+# get_prior(family = gaussian, data = d,
+#           formula = Divorce_s ~ 1 + MedianAgeMarriage_s)
+
+priors <- c(prior(normal(0, 0.5), class = b, coef = "Marriage_s"),
+            prior(normal(0, 0.5), class = Intercept))
+
+mra_m2 <- brm(family = gaussian, data = d,
+          formula = Divorce_s ~ 1 + Marriage_s,
+          cores = 4, chains = 4,
+          sample_prior = T, prior = priors,
+          control = list(max_treedepth = 15),
+          file = mfile)
+
+```
+
+Prior simulations
+```{r}
+
+mcmc_dens(mra_m2)
+mcmc_trace(mra_m2)
+stanplot(mra_m2)
+
+```
+
+```{r}
+
+mra_m2 %>%
+  log_lik() %>%
+  as_tibble(.name_repair = "unique") %>%
+  transmute(lp = rowSums(.)) %>%
+  ggplot(aes(x = lp)) + geom_density()
+
+```
+Prior simulations
+```{r}
+
+posterior_samples(mra_m2) %>%
+  select(prior_Intercept, b_Intercept) %>%
+  pivot_longer(names_to = "Intercept_type", 
+               values_to = "Intercept_values", 
+               cols = c(b_Intercept, prior_Intercept)) %>%
+  ggplot(aes(x = Intercept_values, col = Intercept_type)) +
+    geom_density(aes(fill = Intercept_type), alpha = 0.2) +
+    ggtitle("Compare Intercepts")
+
+posterior_samples(mra_m2) %>%
+  select(prior_b, b_Marriage_s) %>%
+  pivot_longer(names_to = "slope_type", 
+               values_to = "slope_values", 
+               cols = c(prior_b, b_Marriage_s)) %>%
+  ggplot(aes(x = slope_values, col = slope_type)) +
+    geom_density(aes(fill = slope_type), alpha = 0.2) +
+    ggtitle("Compare Slopes")
+
+```
+
+Posterior checks
+```{r}
+pp_check(mra_m2, type = "dens_overlay")
+pp_check(mra_m2, type = "error_hist")
+pp_check(mra_m2, type = "boxplot")
+pp_check(mra_m2, type = "ribbon")
+```
+
+```{r}
+
+d %>%
+  select(Marriage, Marriage_s, Divorce_s, Divorce) %>%
+  add_fitted_draws(mra_m2) %>%
+  mutate(preds = .value * sd_d + mu_d) %>%
+  ggplot(aes(y = preds, x = Marriage)) + geom_point() +
+    geom_point(aes(y = Divorce, x = Marriage), color = "lightblue")
+
+d %>%
+  select(Marriage, Marriage_s, Divorce_s, Divorce) %>%
+  add_predicted_draws(mra_m2) %>%
+  mutate(preds = .prediction * sd_d + mu_d) %>%
+  ggplot() +
+    geom_point(aes(y = preds, x = Marriage)) +
+    geom_point(aes(y = Divorce, x = Marriage), color = "lightblue")
+
+```
+
+Compare the 2 models
+```{r}
+
+loo_compare(waic(mra_m1), waic(mra_m2))
+
+```
+
+```{r}
+
+mfile <- "models/mra_m3"
+# file.remove(paste0(mfile, ".rds"))
+
+# get_prior(family = gaussian, data = d,
+#           formula = Divorce_s ~ 1 + MedianAgeMarriage_s)
+
+priors <- c(prior(normal(0, 0.5), class = b),
+            prior(normal(0, 0.5), class = Intercept))
+
+mra_m3 <- brm(family = gaussian, data = d,
+          formula = Divorce_s ~ 1 + Marriage_s + MedianAgeMarriage_s,
+          cores = 4, chains = 4,
+          sample_prior = T, prior = priors,
+          control = list(max_treedepth = 15))
+
+```
+
+```{r}
+mcmc_dens(mra_m3)
+mcmc_trace(mra_m3)
+stanplot(mra_m3)
+
+```
+
+```{r}
+
+mra_m3 %>%
+  log_lik() %>%
+  as_tibble(.name_repair = "unique") %>%
+  transmute(lp = rowSums(.)) %>%
+  ggplot(aes(x = lp)) + geom_density()
+
+```
+
+```{r}
+
+get_variables(mra_m3)
+
+posterior_samples(mra_m3) %>%
+  select(prior_Intercept, b_Intercept) %>%
+  pivot_longer(names_to = "Intercept_type", 
+               values_to = "Intercept_values", 
+               cols = c(b_Intercept, prior_Intercept)) %>%
+  ggplot(aes(x = Intercept_values, col = Intercept_type)) +
+    geom_density(aes(fill = Intercept_type), alpha = 0.2) +
+    ggtitle("Compare Intercepts")
+
+posterior_samples(mra_m3) %>%
+  select(prior_b, b_Marriage_s) %>%
+  pivot_longer(names_to = "slope_type", 
+               values_to = "slope_values", 
+               cols = c(prior_b, b_Marriage_s)) %>%
+  ggplot(aes(x = slope_values, col = slope_type)) +
+    geom_density(aes(fill = slope_type), alpha = 0.2) +
+    ggtitle("Compare Slopes - Marraige Rate")
+
+posterior_samples(mra_m3) %>%
+  select(prior_b, b_MedianAgeMarriage_s) %>%
+  pivot_longer(names_to = "slope_type", 
+               values_to = "slope_values", 
+               cols = c(prior_b, b_MedianAgeMarriage_s)) %>%
+  ggplot(aes(x = slope_values, col = slope_type)) +
+    geom_density(aes(fill = slope_type), alpha = 0.2) +
+    ggtitle("Compare Slopes - Age")
+
+```
+
+Posterior checks
+```{r}
+pp_check(mra_m3, type = "dens_overlay")
+pp_check(mra_m3, type = "error_hist")
+pp_check(mra_m3, type = "boxplot")
+pp_check(mra_m3, type = "ribbon")
+```
+
+Setting median marriage to 0 and looking at predictions
+
+```{r}
+
+d %>%
+  select(Marriage, Marriage_s, Divorce_s, Divorce) %>%
+  mutate(MedianAgeMarriage_s = 0,
+         MedianAgeMarriage = MedianAgeMarriage_s * sd_age + mu_age) %>%
+  add_fitted_draws(mra_m3) %>%
+  mutate(preds = .value * sd_d + mu_d) %>%
+  ggplot(aes(y = preds, x = Marriage)) + geom_point() +
+    geom_point(aes(y = Divorce, x = Marriage), color = "lightblue") +
+    ggtitle("Counterfactual (Fitted Draws): setting scaled median age to 0")
+
+d %>%
+  select(Marriage, Marriage_s, Divorce_s, Divorce) %>%
+  mutate(MedianAgeMarriage_s = 0,
+         MedianAgeMarriage = MedianAgeMarriage_s * sd_age + mu_age) %>%
+  add_predicted_draws(mra_m3) %>%
+  mutate(preds = .prediction * sd_d + mu_d) %>%
+  ggplot() +
+    geom_point(aes(y = preds, x = Marriage)) +
+    geom_point(aes(y = Divorce, x = Marriage), color = "lightblue") +
+    ggtitle("Counterfactual (Predicted Draws): setting scaled median age to 0")
+
+
+```
+
+Setting marriage rate to 0 and looking at predictions
+
+```{r}
+
+d %>%
+  select(Divorce_s, Divorce,MedianAgeMarriage_s , MedianAgeMarriage) %>%
+  mutate(Marriage_s = 0,
+         Marriage = Marriage_s * sd_mr + mu_mr) %>%
+  add_fitted_draws(mra_m3) %>%
+  mutate(preds = .value * sd_d + mu_d) %>%
+  ggplot(aes(y = preds, x = MedianAgeMarriage)) + geom_point() +
+    geom_point(aes(y = Divorce, x = MedianAgeMarriage), color = "lightblue") +
+    ggtitle("Counterfactual (Fitted Draws): setting scaled marriage rate to 0")
+
+d %>%
+  select(Divorce_s, Divorce, MedianAgeMarriage, MedianAgeMarriage_s) %>%
+  mutate(Marriage_s = 0,
+         Marriage = Marriage_s * sd_mr + mu_mr) %>%
+  add_predicted_draws(mra_m3) %>%
+  mutate(preds = .prediction * sd_d + mu_d) %>%
+  ggplot() +
+    geom_point(aes(y = preds, x = MedianAgeMarriage)) +
+    geom_point(aes(y = Divorce, x = MedianAgeMarriage), color = "lightblue") +
+    ggtitle("Counterfactual (Predicted Draws): setting scaled marriage rate to 0")
+
+```
+
+As we can clearly see, there is a trend observed with changing age and fixed marraige rate, than the reverse.  This is seen from the multivariate regression
