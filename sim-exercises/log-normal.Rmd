@@ -1,0 +1,223 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, echo=F, include=F}
+
+source("../init_settings.R")
+
+```
+
+Create a simple dataset
+
+```{r}
+
+data(Howell1)
+d <- Howell1
+
+d2 <- d[d$age > 18, ]
+
+mu_h <- mean(d2$height)
+sd_h <- sd(d2$height)
+
+mu_a <- mean(d$age)
+sd_a <- sd(d2$age)
+
+mu_w <- mean(d2$weight)
+sd_w <- sd(d2$weight)
+
+d2$scaled_height <- (d2$height - mu_h) / sd_h
+d2$scaled_weight <- (d2$weight - mu_w) / sd_w
+d2$scaled_age <- (d2$age - mu_a) / sd_a
+
+```
+
+
+
+```{r}
+
+mfile <- "models/hm_1"
+# file.remove(paste0(mfile, ".rds"))
+
+hm_1 <- brm(family = gaussian, data = d2,
+            formula = scaled_height ~ 1 + scaled_weight,
+            cores = 4, chains = 4,
+            sample_prior = T,
+            file = mfile)
+
+```
+
+```{r}
+summary(hm_1)
+```
+
+```{r}
+
+tibble(scaled_weight = seq(-2, 2, length.out = 25)) %>% 
+  mutate(weight = scaled_weight * sd_w  + mu_w) %>% 
+  add_predicted_draws(hm_1) %>% 
+  mutate(height = .prediction * sd_h + mu_h) %>%
+  ggplot(aes(x = weight, y = height)) +
+    geom_point() +
+    geom_point(data = d2, aes(x = weight, y = height), color = "blue")
+
+tibble(scaled_weight = seq(-2, 2, length.out = 25)) %>% 
+  mutate(weight = scaled_weight * sd_w  + mu_w) %>% 
+  add_fitted_draws(hm_1) %>% 
+  mutate(height = .value * sd_h + mu_h) %>%
+  ggplot(aes(x = weight, y = height)) +
+    geom_point() +
+    geom_point(data = d2, aes(x = weight, y = height), color = "blue")
+
+```
+
+Computing lppd
+
+```{r}
+
+waic(hm_1)
+
+```
+
+Building a log normal model
+```{r}
+
+mfile <- "models/hm_2"
+# file.remove(paste0(mfile, ".rds"))
+
+hm_2 <- brm(family = lognormal, data = d2,
+            formula = height ~ 1 + scaled_weight,
+            cores = 4, chains = 4,
+            sample_prior = T,
+            file = mfile)
+
+
+```
+
+```{r}
+
+tibble(scaled_weight = seq(-2, 2, length.out = 25)) %>% 
+  mutate(weight = scaled_weight * sd_w  + mu_w) %>% 
+  add_predicted_draws(hm_2) %>% 
+  mutate(height = .prediction) %>%
+  ggplot(aes(x = weight, y = height)) +
+    geom_point() +
+    geom_point(data = d2, aes(x = weight, y = height), color = "blue")
+
+tibble(scaled_weight = seq(-2, 2, length.out = 25)) %>% 
+  mutate(weight = scaled_weight * sd_w  + mu_w) %>% 
+  add_fitted_draws(hm_2) %>% 
+  mutate(height = .value) %>%
+  ggplot(aes(x = weight, y = height)) +
+    geom_point() +
+    geom_point(data = d2, aes(x = weight, y = height), color = "blue")
+
+```
+
+Comparing the 2 models
+
+```{r}
+
+loo_compare(waic(hm_1), waic(hm_2))
+
+```
+
+Creating age bands and seeing if the data results 
+
+```{r}
+d2 <- d2 %>% mutate(age_band = case_when(age < 30 ~ "1_l30",
+                                         age < 45 ~ "2_l45",
+                                         age < 60 ~ "3_l60",
+                                         TRUE ~ "4_g60"))
+```
+
+Looking at height vs weight for different age bands
+
+```{r}
+
+d2 %>% 
+  ggplot(aes(x = weight, y = height, col = age_band)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = F)
+
+```
+
+```{r}
+
+
+mfile <- "models/hm_3"
+# file.remove(paste0(mfile, ".rds"))
+
+hm_3 <- brm(family = gaussian, data = d2,
+            formula = scaled_height ~ 1 + (scaled_weight|age_band),
+            cores = 4, chains = 4,
+            sample_prior = T,
+            control = list(adapt_delta = 1 - 1e-6,
+                           max_treedepth = 15),
+            iter = 8000, warmup = 6000,
+            file = mfile)
+
+```
+
+```{r}
+summary(hm_3)
+```
+
+```{r}
+get_variables(hm_3)
+```
+
+```{r}
+
+expand_grid(
+  age_band = unique(d2$age_band),
+  scaled_weight = seq(-2, 2, length.out = 20)
+) %>%
+  add_predicted_draws(hm_3) %>%
+  mutate(height = .prediction * sd_h + mu_h) %>%
+  median_qi(height) %>% 
+  mutate(weight = scaled_weight * sd_w + mu_w) %>% 
+  ggplot(aes(x = weight, y = height, ymax = .upper, ymin = .lower, fill = age_band)) + geom_ribbon(alpha = 0.2)
+
+```
+
+```{r}
+
+mfile <- "models/hm_4"
+# file.remove(paste0(mfile, ".rds"))
+
+hm_4 <- brm(family = lognormal, data = d2,
+            formula = height ~ 1 + (scaled_weight|age_band),
+            cores = 4, chains = 4,
+            sample_prior = T,
+            control = list(adapt_delta = 1 - 1e-4,
+                           max_treedepth = 15),
+            file = mfile)
+
+```
+
+```{r}
+
+expand_grid(
+  age_band = unique(d2$age_band),
+  scaled_weight = seq(-2, 2, length.out = 20)
+) %>%
+  add_predicted_draws(hm_4) %>%
+  mutate(height = .prediction) %>%
+  median_qi(height) %>% 
+  mutate(weight = scaled_weight * sd_w + mu_w) %>% 
+  ggplot(aes(x = weight, y = height, ymax = .upper, ymin = .lower, fill = age_band)) + geom_ribbon(alpha = 0.2)
+
+expand_grid(
+  age_band = unique(d2$age_band),
+  scaled_weight = seq(-2, 2, length.out = 20)
+) %>%
+  add_fitted_draws(hm_4) %>%
+  mutate(height = .value) %>%
+  median_qi(height) %>% 
+  mutate(weight = scaled_weight * sd_w + mu_w) %>% 
+  ggplot(aes(x = weight, y = height, ymax = .upper, ymin = .lower, fill = age_band)) + geom_ribbon(alpha = 0.2)
+
+```
+
