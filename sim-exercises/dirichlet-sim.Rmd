@@ -1,0 +1,86 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+The dirichlet distribution is a multivariate distribution with n components and each component takes on a value between 0 and 1, and they sum to zero
+
+
+```{r}
+require(ggplot2)
+require(tidyverse)
+
+require(Compositional)
+require(MCMCpack)
+
+```
+
+```{r}
+
+draw <- 10
+alpha <- c(1,2,3)
+dimension <- 3
+
+s <- rdirichlet(n = draw, alpha = alpha)
+
+```
+
+```{r}
+
+s %>%
+  as_tibble() %>%
+  mutate(rowSums(.))
+
+```
+
+```{r}
+draws <- rdirichlet(200, c(.01,.01,.01) )
+bivt.contour(draws)
+```
+
+
+```{r}
+
+draws <- rdirichlet(200, c(.1,.1,.1) )
+bivt.contour(draws)
+
+```
+
+
+```{r}
+draws <- rdirichlet(200, c(1,1,1) )
+bivt.contour(draws)
+```
+
+```{r}
+
+draws <- rdirichlet(200, c(10,10,10) )
+bivt.contour(draws)
+
+```
+
+```{r}
+
+draws <- rdirichlet(200, c(100,100,100) )
+bivt.contour(draws)
+
+```
+
+```{r}
+
+
+draws <- rdirichlet(200, c(1000,1000,1000) )
+bivt.contour(draws)
+
+
+```
+
+```{r}
+
+rdirichlet(200, c(1,1)) %>%
+  as_tibble() %>%
+  gather(cols, vals) %>%
+  ggplot(aes(x = vals, col = cols)) + geom_density()
+
+```
+
