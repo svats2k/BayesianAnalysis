@@ -318,3 +318,67 @@ d_m1 %>%
 
 ```
 
+Trying out hierarchical models
+
+```{r}
+
+mfile <- "models/gsa_m3_defp"
+# file.remove(paste0(mfile, ".rds"))
+
+# get_prior(data = d_m1, family = binomial, prior = priors,
+#           formula = Admitted | trials(applications) ~ 1 + (1|Gender) + (1|Dept))
+
+gsa_m3_defp <- brm(data = d_m1, family = binomial,
+              formula = Admitted | trials(applications) ~ 1 + (1|Gender) + (1|Dept),
+              chains = 4, cores = 4,
+              sample_prior = T,
+              control = list(adapt_delta = 0.99,
+                             max_treedepth = 15),
+              file = mfile)
+
+
+```
+
+Examining the chains
+
+```{r}
+
+mcmc_trace(gsa_m3_defp)
+
+```
+
+
+```{r}
+
+d_m1 %>%
+  data_grid(Gender, Dept) %>%
+  mutate(applications = 100) %>%
+  add_predicted_draws(gsa_m3_defp) %>%
+  ggplot(aes(x = .prediction, fill = Gender, col = Gender)) +
+    geom_density(alpha = 0.2) +
+    facet_wrap(Dept~., scales = "free")
+
+```
+
+Using regularized priors
+
+```{r}
+
+mfile <- "models/gsa_m3_regp"
+# file.remove(paste0(mfile, ".rds"))
+
+# get_prior(data = d_m1, family = binomial, prior = priors,
+#           formula = Admitted | trials(applications) ~ 1 + (1|Gender) + (1|Dept))
+
+priors <- c(prior(normal(0, 1.5), class = Intercept))
+
+gsa_m3_regp <- brm(data = d_m1, family = binomial,
+              formula = Admitted | trials(applications) ~ 1 + (1|Gender) + (1|Dept),
+              chains = 4, cores = 4,
+              sample_prior = T, prior = priors,
+              control = list(adapt_delta = 0.99,
+                             max_treedepth = 15),
+              file = mfile)
+
+```
+
