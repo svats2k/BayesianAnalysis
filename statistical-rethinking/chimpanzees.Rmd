@@ -298,26 +298,14 @@ Considering both actor and treatment
 
 ```{r}
 
-
-# priors <- c(prior(normal(0, 0.5), class = b, coef = treatment2),
-#              prior(normal(0, 0.5), class = b, coef = treatment3),
-#              prior(normal(0, 0.5), class = b, coef = treatment4),
-#              prior(normal(0, 1.5), class = b, coef = actor1),
-#             prior(normal(0, 1.5), class = b, coef = actor2),
-#             prior(normal(0, 1.5), class = b, coef = actor3),
-#             prior(normal(0, 1.5), class = b, coef = actor4),
-#             prior(normal(0, 1.5), class = b, coef = actor5),
-#             prior(normal(0, 1.5), class = b, coef = actor6),
-#             prior(normal(0, 1.5), class = b, coef = actor7))
-
-
 mfile <- "models/chimp_m11.4"
 # file.remove(paste0(mfile, ".rds"))
 
-get_prior(data = d, family = bernoulli,
-          formula = pulled_left ~ 0 + actor + treatment)
+# get_prior(data = d, family = bernoulli,
+#           formula = pulled_left ~ 1 + actor + treatment)
 
-priors <- c(prior(normal(0, 0.5), class = b))
+priors <- c(prior_string("normal(2, 1.5)", class = "b", coef = paste("actor", 2:7, sep="")),
+            prior_string("normal(0, 0.05)", class = "b", coef = paste("treatment", 2:4, sep="")))
 
 bm_11.4 <- brm(data = d, family = bernoulli,
           formula = pulled_left ~ 1 + actor + treatment,
@@ -327,6 +315,16 @@ bm_11.4 <- brm(data = d, family = bernoulli,
 
 ```
 
+Prior predictive distribution
+```{r}
+
+prior_samples(bm_11.4) %>%
+  select(b_treatment2) %>%
+  ggplot(aes(x = b_treatment2)) + geom_density()
+
+```
+
+Posterior predictive distribution
 ```{r}
 
 d %>%
