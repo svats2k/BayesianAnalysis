@@ -163,3 +163,122 @@ new_df %>%
 
 ```
 
+Building a model with interaction
+
+```{r}
+
+mfile <- "models/africa_m3"
+file.remove(paste0(mfile, ".rds"))
+
+# get_prior(data = dd, family = gaussian,
+#           formula = log_gdp_std ~ 1 + cont_africa + rugged_std + cont_africa:rugged_std)
+
+priors <- c(prior(normal(0, 0.5), class = Intercept),
+            prior(normal(0, 0.5), class = b))
+
+africa_m3 <- brm(data = dd, family = gaussian,
+                 formula = log_gdp_std ~ 1 + cont_africa + rugged_std + cont_africa:rugged_std,
+                 sample_prior = T, prior = priors,
+                 cores = 4, chains = 4,
+                 control = list(adapt_delta = 0.95,
+                                max_treedepth = 15),
+                 file = mfile)
+
+```
+
+```{r}
+
+posterior_samples(africa_m3)
+
+```
+
+```{r}
+
+new_df <- expand.grid(cont_africa = c(0,1),
+                      rugged_std = seq(from = -2, to = 2, length.out = 100)) %>%
+          as_tibble()
+
+new_df %>%
+  mutate(cont_africa = as.factor(cont_africa)) %>%
+  add_predicted_draws(africa_m3) %>%
+  ggplot(aes(y = .prediction, x = rugged_std,
+             col = cont_africa, fill = cont_africa)) +
+    geom_point(alpha = 0.2)
+
+new_df %>%
+  mutate(cont_africa = as.factor(cont_africa)) %>%
+  add_fitted0_draws(africa_m3) %>%
+  ggplot(aes(y = .value, x = rugged_std,
+             col = cont_africa, fill = cont_africa)) +
+    geom_point(alpha = 0.2)
+
+```
+
+```{r}
+
+mfile <- "models/africa_m4"
+file.remove(paste0(mfile, ".rds"))
+
+# get_prior(data = dd, family = gaussian,
+#           formula = log_gdp_std ~ 1 + (rugged_std|cont_africa))
+
+priors <- c(prior(normal(0, 0.5), class = Intercept))
+
+africa_m4 <- brm(data = dd, family = gaussian,
+                 formula = log_gdp_std ~ 1 + (rugged_std | cont_africa),
+                 sample_prior = T, prior = priors,
+                 cores = 4, chains = 4,
+                 control = list(adapt_delta = 0.9999,
+                                max_treedepth = 15),
+                 iter = 5000, warmup = 4000,
+                 file = mfile)
+
+```
+
+```{r}
+require(shinystan)
+
+shinystan::launch_shinystan(africa_m4)
+```
+
+```{r}
+new_df <- expand.grid(cont_africa = c(0,1),
+                      rugged_std = seq(from = -2, to = 2, length.out = 100)) %>%
+          as_tibble()
+
+new_df %>%
+  mutate(cont_africa = as.factor(cont_africa)) %>%
+  add_predicted_draws(africa_m4) %>%
+  ggplot(aes(y = .prediction, x = rugged_std,
+             col = cont_africa, fill = cont_africa)) +
+    geom_point(alpha = 0.2)
+
+new_df %>%
+  mutate(cont_africa = as.factor(cont_africa)) %>%
+  add_fitted_draws(africa_m4) %>%
+  ggplot(aes(y = .value, x = rugged_std,
+             col = cont_africa, fill = cont_africa)) +
+    geom_point(alpha = 0.2)
+
+```
+
+```{r}
+p1 <- new_df %>%
+  mutate(cont_africa = as.factor(cont_africa)) %>%
+  add_fitted_draws(africa_m4) %>%
+  ggplot(aes(y = .value, x = rugged_std,
+             col = cont_africa, fill = cont_africa)) +
+    geom_point(alpha = 0.2) +
+    ggtitle("With varying slopes")
+
+p2 <- new_df %>%
+  mutate(cont_africa = as.factor(cont_africa)) %>%
+  add_fitted_draws(africa_m3) %>%
+  ggplot(aes(y = .value, x = rugged_std,
+             col = cont_africa, fill = cont_africa)) +
+    geom_point(alpha = 0.2) +
+    ggtitle("Interaction term")
+
+grid.arrange(p1, p2, nrow = 1)
+```
+
