@@ -1,0 +1,215 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r, echo=F, include=F}
+
+source("../init_settings.R")
+
+# set cores to use to the total number of cores
+options(mc.cores = parallel::detectCores()) 
+
+# save a compiled version of the Stan model file
+rstan_options(auto_write = TRUE)
+
+```
+
+Simple bernoulli model
+
+```{r}
+
+N <- 2000
+y <- rbern(N, prob = 0.6)
+data_list <- list(y = y, N = N)
+
+b_fit <- stan(file = "simp_bern.stan", data = data_list, refresh = 0)
+
+rstan::extract(b_fit) %>% as_tibble() %>% ggplot(aes(x = theta)) + geom_density()
+
+show(b_fit)
+
+traceplot(b_fit)
+
+plot(b_fit, plotfun = "dens")
+
+# plot the density of posterior samples and add the true posterior density
+true_posterior = geom_line(data = tibble(theta = seq(0,1, length.out = 1000),
+                                         dens = dbern(theta, prob = 0.6)), 
+                           aes( x = theta, y = dens), color = "skyblue", size = 1)
+
+plot(b_fit, plotfun = "dens")
+
+# extract the samples
+samples = rstan::extract(b_fit) %>% as.tibble()
+
+samples
+
+# plotting samples our own way
+samples %>% ggplot(aes(x = theta)) + geom_histogram(bins = 70)
+
+####################
+## variational Bayes
+####################
+
+vb_fit = vb(stan_model("simp_bern.stan"), data = data_list)
+
+tibble(theta = rstan::extract(vb_fit)$theta) %>% 
+  ggplot(aes(x = theta)) + geom_density()
+
+#####################
+## MAP ::: optimizing
+#####################
+
+MAP = optimizing(stan_model("simp_bern.stan"), data = data_list)$par
+
+ggplot() +  
+  geom_line(data = tibble(x = c(MAP, MAP), 
+                          y = c(0, MAP)),
+  aes(x = x, y = y))
+
+```
+
+```{r}
+
+# prepare the data
+## Stan expects a list but since tibbles and data frames are lists, this often works in 
+## practice as well variable names must correspond to Stan code
+dataList = list(k = 7, N = 24)
+dataList = tibble(k = 7, N = 24)
+
+# fit the model to the data
+fit = stan(file = 'simp_binom.stan',
+           data = dataList)
+
+# show a summary of the fit
+show(fit)
+
+# inspect traceplot
+traceplot(fit)
+
+# plot the density of posterior samples
+plot(fit, plotfun = "dens")
+
+# plot the density of posterior samples and add the true posterior density
+true_posterior = geom_line(data = tibble(theta = seq(0,1, length.out = 1000),
+                                         dens = dbeta(theta,8,18)), 
+                           aes( x = theta, y = dens), color = "skyblue", size = 1)
+
+plot(fit, plotfun = "dens") + true_posterior
+  
+# extract the samples
+samples = rstan::extract(fit) %>% as.tibble()
+
+# plotting samples our own way
+samples %>% ggplot(aes(x = theta)) + geom_histogram(bins = 70)
+
+####################
+## variational Bayes
+####################
+
+vb_fit = vb(stan_model("simp_binom.stan"), data = dataList)
+
+tibble(theta = rstan::extract(vb_fit)$theta) %>% 
+  ggplot(aes(x = theta)) + geom_density() + true_posterior
+
+#####################
+## MAP ::: optimizing
+#####################
+
+MAP = optimizing(stan_model("simp_binom.stan"), data = dataList)$par
+
+ggplot() + true_posterior + 
+  geom_line(data = tibble(x = c(MAP, MAP), 
+      y = c(0, dbeta(MAP, dataList$k + 1, dataList$N - dataList$k + 1))),
+  aes(x = x, y = y))
+
+```
+
+
+# Simple gaussian model - just simualtions
+
+## Generating the data
+```{r}
+
+num_iters <- 4000
+
+g_fit <- stan(file = "simp_gauss.stan", refresh = 0, iter = num_iters)
+
+rstan::extract(g_fit,
+               permuted = FALSE,
+               inc_warmup = TRUE,
+               pars = c("lp__"),
+               include = FALSE) %>%
+  as_tibble() %>%
+  mutate(draws = row_number()) %>% 
+  pivot_longer(cols = -draws, names_to = "chains", values_to = "y") %>% 
+  ggplot(aes(x = draws, y = y, col = chains)) +
+    geom_line() +
+    geom_vline(xintercept = num_iters/2)
+
+```
+
+## Plotting the data
+```{r}
+
+# show a summary of the fit
+show(g_fit)
+
+# inspect traceplot
+traceplot(g_fit)
+
+# plot the density of posterior samples
+plot(g_fit, plotfun = "dens")
+
+# plot the density of posterior samples and add the true posterior density
+true_posterior = geom_line(data = tibble(y = seq(0,10, length.out = 1000),
+                                         dens = dnorm(y,5,1)), 
+                           aes( x = y, y = dens), color = "skyblue", size = 1)
+
+plot(g_fit, plotfun = "dens") + true_posterior
+  
+# extract the samples
+samples = rstan::extract(g_fit) %>% as.tibble()
+samples
+
+# plotting samples our own way
+samples %>% ggplot(aes(x = y)) + geom_histogram(bins = 70)
+
+```
+
+# Simple binomial model
+```{r}
+max_trials <- 20
+num_iters <- 4000
+num_data_samples <- 1000
+p <- 0.6
+
+rbinom(n = 10, size = 2, prob = 0.6)
+
+data_list <- list(
+  max_trials = max_trials,
+  num_success = rbinom(n = num_data_samples, size = max_trials, prob = p),
+  N = num_data_samples
+)
+
+bm_fit <- stan(file = "simp_binom.stan",
+               data = data_list,
+               refresh = 0,
+               iter = num_iters)
+
+rstan::extract(bm_fit,
+               permuted = FALSE,
+               inc_warmup = TRUE,
+               pars = c("lp__"),
+               include = FALSE) %>%
+  as_tibble() %>%
+  mutate(draws = row_number()) %>% 
+  pivot_longer(cols = -draws, names_to = "chains", values_to = "p") %>% 
+  ggplot(aes(x = draws, y = p, col = chains)) +
+    geom_line() +
+    geom_vline(xintercept = num_iters/2)
+
+```
+
