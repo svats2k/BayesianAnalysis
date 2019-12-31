@@ -41,3 +41,5 @@ rsconnect/
 
 # knitr files
 *.html
+
+*.rds
