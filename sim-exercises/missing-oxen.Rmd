@@ -1,0 +1,98 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# Problem Definition
+
+This is directly from Dr. Richard Mclearth's blog; I am simply trying to understand and reproduce the case study.
+
+Probelm definition:
+
+In a particular village in central Asia, children are not allowed to drink tea in the evening, until the family ox is stabled. 
+
+You are the village enforcer of oxen customs. Each evening, you must determine which children have properly stabled their oxen. For many houses, you can see whether or not the ox is stabled. But other houses have enclosed stables, so you cannot observe the ox without appearing to accuse that child of violating the rule. To do so and then discover a properly stabled ox would be embarrassing for everyone. 
+
+You’d like to maximize detection of lazy children while minimizing social embarrassment. How to do this?
+
+# Dataset creation
+
+* Assumptions : *
+* 0.75 = proportions of kids who stable their ox (sigma)
+* 1 = probability that a child who stables the ox drinks tea (p_drink)
+      or the proportion of the kids who stable their ox drinks the tea
+* 0.5 = probability that a child who doesn't stable the ox drinks the tea (p_cheat)
+      or the proportion of the kids who don't stable that drink the tea
+* 21/51 children's houses have covered stable
+
+Tea is computed based on 2 probabilities; p_cheat and p_drink
+
+```{r}
+
+set.seed(1)
+N_children <- 51
+s <- rbinom( N_children , size=1 , prob=0.75 )
+s_obs <- s
+s_obs[ sample( 1:N_children , size=21 ) ] <- -1
+tea <- rbinom( N_children , size=1 , prob=s*1 + (1-s)*0.5 )
+
+data_list <- list(
+  N_children = N_children,
+  tea = tea,
+  s = s_obs
+)
+
+```
+
+The data that we are able to observe are 
+(1) whether a kid is drinking the tea or not
+(2) whether a kid has stabled the ox or not, if uncovered shed
+
+
+
+
+Invoking the libraries
+```{r, include=F, echo=F}
+source("../init_settings.R")
+```
+
+```{r}
+
+fit <- stan(file = "missing-oxen.stan", 
+            data = data_list)#,
+            # chains = 4,
+            # iter = 4000,
+            # warmup = 3000,
+            # control = list(adapt_delta = 0.95))
+
+```
+
+```{r}
+rstan::extract(fit) %>% as_tibble()
+
+print( fit , probs=c( (1-0.89)/2 , 1-(1-0.89)/2 ) )
+
+```
+
+```{r}
+
+rstan::extract(fit) %>%
+  as_tibble() %>%
+  mutate(pr_noox_tea = ((1-sigma)*p_cheat) / (sigma * p_drink + (1-sigma)*p_cheat)) %>%
+  ggplot(aes(x = pr_noox_tea)) +
+    geom_density() +
+    xlim(c(0,1)) +
+    xlab("Pr(no-ox|tea)")
+
+```
+
+
+```{r}
+tibble(
+  x = rbeta(1000, 2, 2)
+) %>% 
+  ggplot(aes(x)) + geom_density()
+
+curve( dbeta(x,0.1,0.1) , from=0 , to=1 )
+```
+
