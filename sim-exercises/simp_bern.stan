@@ -1,7 +1,12 @@
-parameters {
-  int <lower=0, upper=1> y ;
+data {
+  real<lower=0, upper=1> theta;
+  int<lower=1> N; 
 }
 
-model {
-  y ~ bernoulli(0.6);
+generated quantities {
+  vector[N] y;
+  for (i in 1:N) {
+    y[i] = bernoulli_rng(theta);
+  }
+  // int y[N] = bernoulli_rng(theta);
 }
