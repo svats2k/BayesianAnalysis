@@ -45,6 +45,8 @@ generated quantities {
    int<lower=0> num_dist_draws_per_pgrp;
    int<lower=1> num_simplex_per_dist;
    int<lower=1> num_draws_from_simplex;
+   real mu[num_param_dims];
+   real<lower=0> sigma[num_param_dims];
  }
  
  transformed data {
@@ -53,7 +55,9 @@ generated quantities {
  
  generated quantities {
    matrix[num_dist_draws_per_pgrp, num_param_dims] theta_mat;
-   matrix[num_dist_draws_per_pgrp, num_draws_from_simplex] final_samples;
+   int final_samples[num_dist_draws_per_pgrp, num_draws_from_simplex];
+   matrix[num_dist_draws_per_pgrp, num_draws_from_simplex] sim_samples;
+
    int l_idx;
    int r_idx;
    
@@ -62,10 +66,17 @@ generated quantities {
      theta_mat[i] = dirichlet_rng(rep_vector(alpha, num_param_dims))';
    }
    
-   // Generating samples for the distributions
+   // Generating (Indicator) samples for the distributions
    for (i in 1:num_dist_draws_per_pgrp) {
      for (j in 1:num_draws_from_simplex) {
        final_samples[i,j] = categorical_rng(theta_mat[i]');
+     }
+   }
+   
+   // Drawing from a gaussian family
+   for (i in 1:num_dist_draws_per_pgrp) {
+     for (j in 1:num_draws_from_simplex) {
+       sim_samples[i,j] = normal_rng(mu[final_samples[i,j]], sigma[final_samples[i,j]]);
      }
    }
  }

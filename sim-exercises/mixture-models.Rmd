@@ -100,25 +100,6 @@ plot(t(rstan::extract(m)$theta))
 round(rdirichlet(5, c(1e2, 1e2)),2)
 ```
 
-```{r}
-
-alpha <- 0.001
-num_dimensions <- 5
-num_samples <- 100
-
-data_list <- list(num_dimensions = num_dimensions,
-                  alpha = alpha,
-                  num_samples = num_samples)
-m <- stan(file = "test.stan",
-          iter = 1, chains = 1,
-          algorithm = "Fixed_param",
-          data = data_list)
-
-```
-
-```{r}
-round(rstan::extract(m)$theta[,,],2)[1:5,]
-```
 
 ```{r}
 data_list <- list(
@@ -142,3 +123,34 @@ rstan::extract(m)$theta_mat[,,]
 rstan::extract(m)$final_samples[,,]
 ```
 
+```{r}
+
+alpha <- 1
+num_param_dims <- 5
+num_dist_draws_per_pgrp <- 5
+num_simplex_per_dist <- 30
+num_draws_from_simplex <- 15
+mu <- c(1e0, 1e1, 1e2, 1e3, 1e4)
+sigma <- c(0.1, 0.1, 0.1, 0.1, 0.1)
+  
+data_list <- list(num_param_dims = num_param_dims,
+                  alpha = alpha,
+                  num_dist_draws_per_pgrp = num_dist_draws_per_pgrp,
+                  num_simplex_per_dist = num_simplex_per_dist,
+                  num_draws_from_simplex = num_draws_from_simplex,
+                  mu = mu,
+                  sigma = sigma)
+m <- stan(file = "mixture-models.stan",
+          iter = 1, chains = 1,
+          algorithm = "Fixed_param",
+          data = data_list)
+
+```
+
+```{r}
+rstan::extract(m)$theta_mat[,,]
+
+rstan::extract(m)$final_samples[,,]
+
+rstan::extract(m)$sim_samples[,,]
+```
