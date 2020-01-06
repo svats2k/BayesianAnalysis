@@ -43,3 +43,5 @@ rsconnect/
 *.html
 
 *.rds
+*/*.hpp
+*/*.o

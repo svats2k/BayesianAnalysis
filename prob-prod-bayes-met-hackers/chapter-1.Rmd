@@ -1,0 +1,60 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, echo=F, include=F}
+
+source("../init_settings.R")
+
+```
+
+
+Compiling the model object
+```{r}
+
+m <- cmdstan_model("coin-flip.stan")
+
+```
+
+
+```{r}
+
+extract_lambda_draws <- function(mod, obs_data, iter = 1) {
+
+  dl <- list(N = length(obs_data), obs_data = obs_data)
+  print(paste("Model build iteration: ", iter))
+
+  fit <- mod$sample(data = dl, num_chains = 4, num_cores = 4)
+
+  print("Model build competed ...")
+  draws <- fit$draws()[,,1] %>% as_tibble() 
+  return(round(draws,3))
+}
+ 
+coin_tosses <- rbern(20, 0.6)
+
+results <- tibble()
+
+for (i in c(2:length(coin_tosses))) {
+  d <- extract_lambda_draws(m, coin_tosses[1:i], i)
+  d <- d %>% mutate(iter = i)
+  results <- rbind(results, d)
+}
+
+```
+
+```{r}
+
+results$draws <- results$iter %>% 
+  purrr::map(function(x) paste0(unlist(as.character(coin_tosses[1:x])), collapse = "")) %>% 
+  unlist()
+
+results %>%
+  pivot_longer(cols = c(ends_with("lambda")), names_to = "chains", values_to = "lambda" ) %>% 
+  mutate(chains = gsub(".lambda", "", chains)) %>% 
+  ggplot(aes(x = lambda)) + geom_density() + facet_wrap(draws~., nrow = 4, ncol = 5)
+
+```
+
+
