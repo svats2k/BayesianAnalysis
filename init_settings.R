@@ -32,6 +32,8 @@ require(modelr)
 require(gridExtra)
 require(scales)
 require(ggrepel)
+require(posterior)
+require(cmdstanr)
 
 options(warnPartialMatchDollar = TRUE)
 Sys.setenv("_R_CHECK_LENGTH_1_CONDITION_" = "true")
