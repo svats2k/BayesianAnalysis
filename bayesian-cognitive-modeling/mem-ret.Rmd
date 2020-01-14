@@ -1,0 +1,137 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, echo=F, include=F}
+
+source("../init_settings.R")
+
+```
+
+Generating the dataset
+
+```{r}
+t     <- c(1, 2, 4, 7, 12, 21, 35, 59, 99, 200)
+nt    <- length(t)
+slist <- 1:4
+ns    <- length(slist)
+
+k1 <- matrix(c(18, 18, 16, 13, 9, 6, 4, 4, 4, NA,
+               17, 13,  9,  6, 4, 4, 4, 4, 4, NA,
+               14, 10,  6,  4, 4, 4, 4, 4, 4, NA,
+               NA, NA, NA, NA,NA,NA,NA,NA,NA, NA),
+             nrow=ns, ncol=nt, byrow=T)
+
+k <- k1[1:(ns - 1), 1:(nt - 1)]   # Excluding NAs (for Stan solution)
+
+n <- 18
+
+data <- list(k=k, n=n, t=t, ns=ns, nt=nt) # To be passed on to Stan
+data
+
+```
+
+```{r}
+# generating a list of lists
+inits <- list(alpha=0.5, beta=0.1)
+inits_ll <- lapply(1:4, function(x) inits)
+
+m <- stan(file = "mem-ret_1.stan",
+          data = data,
+          control = list(adapt_delta = 1 - 1e-3),
+          cores = 4,
+          chains = 4,
+          init = init_ll,
+          pars = c("alpha", "beta", "predk"))
+
+# m <- cmdstan_model("mem-ret_1.stan")
+
+```
+
+```{r}
+
+rstan::extract(m)$predk[3999,,]
+
+```
+
+```{r}
+str(rstan::extract(m))
+```
+
+```{r}
+rstan::extract(m)$alpha %>% as_tibble() %>% 
+  ggplot(aes(x = value)) + geom_density()
+```
+
+```{r}
+
+tibble(alpha = rstan::extract(m)$alpha,
+       beta = rstan::extract(m)$beta) %>% 
+ggplot(aes(x = alpha, y= beta)) + geom_point() +
+  xlim(c(0,1)) +ylim(c(0,1))
+
+```
+
+```{r}
+
+
+rstan::extract(m)$predk[,1,] %>% as_tibble() %>% 
+  pivot_longer(cols = everything(), names_to = "t_steps", values_to = "num_success") %>%
+  mutate(t_steps = str_replace(t_steps, "V", "")) %>% 
+  ggplot(aes(x = t_steps, y = num_success)) +geom_violin()
+
+
+```
+
+```{r}
+# generating a list of lists
+inits <- list(alpha=rep(0.5, ns), beta=rep(0.1, ns))
+inits_ll <- lapply(1:4, function(x) inits)
+
+m2 <- stan(file = "mem-ret_2_test.stan",
+            data = data,
+            control = list(adapt_delta = 1 - 1e-3,
+                           max_treedepth = 15),
+            cores = 4,
+            chains = 4,
+            init = inits_ll,
+           iter = 20000,
+            pars = c("alpha", "beta", "predk"))
+
+# m <- cmdstan_model("mem-ret_1.stan")
+
+```
+
+```{r}
+
+inits <- list(alpha=rep(0.5, ns), beta=rep(0.1, ns))
+myinits <- lapply(1:4, function(x) inits)
+
+# myinits <- list(
+#   list(alpha=rep(.5, ns), beta=rep(.1, ns)))
+# 
+# myinits
+
+parameters <- c("alpha", "beta", "predk")  # Parameters to be monitored
+
+# For a detailed description type "?rstan".
+samples <- stan(file="mem-ret_3.stan",
+                data=data, 
+                init=myinits,  # If not specified, gives random inits
+                pars=parameters,
+                iter=20000, 
+                chains=4,
+)
+
+# m <- cmdstan_model("mem-ret_3.stan")
+
+
+```
+
+```{r}
+
+
+
+```
+

@@ -10,7 +10,7 @@ parameters {
 model {
   target += beta_lpdf(lambda | 1,1);
   for (n in 1:N) {
-    target += bernoulli_logit_lpmf(obs_data[n] | lambda);
+    target += bernoulli_lpmf(obs_data[n] | lambda);
     // obs_data[n] ~ bernoulli_logit(lambda);
   }
 }

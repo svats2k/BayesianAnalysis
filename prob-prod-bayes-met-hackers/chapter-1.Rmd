@@ -69,23 +69,24 @@ num_tosses <- c(10, 100, 1000, 10000)
 results <- tibble()
 
 for (i in num_tosses) {
-  coin_tosses <- sample(c(0,1), i, replace = T, prob = c(0.6, 0.4))
+  coin_tosses <- sample(c(0,1), i, replace = T, prob = c(0.4, 0.6))
   d <- extract_lambda_draws(m, coin_tosses, i)
   d <- d %>% mutate(iter = i)
   results <- rbind(results, d)
 }
 
 results %>%
-  pivot_longer(cols = c(ends_with("lambda")), names_to = "chains", values_to = "lambda" ) %>% 
+  pivot_longer(cols = c(ends_with("lambda")), names_to = "chains", values_to = "lambda" ) %>%
   mutate(chains = gsub(".lambda", "", chains)) %>% 
-  ggplot(aes(x = lambda)) + geom_density() + facet_wrap(iter~., nrow = 4, ncol = 5)
+  ggplot(aes(x = lambda)) + geom_density() + facet_wrap(iter~., nrow = 4, ncol = 5) + xlim(c(0,1))
 
 
 ```
 
+
 ```{r}
 
-sum(sample(c(0,1), 200, replace = T, prob = c(0.4, 0.6)))
+
 
 ```
 

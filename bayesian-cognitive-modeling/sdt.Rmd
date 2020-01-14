@@ -1,0 +1,87 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, include=F, echo=F}
+
+source("../init_settings.R")
+
+```
+
+```{r}
+dataset <- 1
+
+if (dataset == 1) {  # Demo
+  k <- 3 # number of cases
+  data <- matrix(c(70, 50, 30, 50,
+                    7,  5,  3,  5, 
+                   10,  0,  0, 10), nrow=k, ncol=4, byrow=TRUE)
+}
+
+if (dataset == 2) {  # Lehrner et al. (1995) data 
+  k <- 3 # number of cases
+  data <- matrix(c(148, 29, 32, 151,
+                   150, 40, 30, 140,
+                   150, 51, 40, 139), nrow=k, ncol=4, byrow=TRUE)
+}
+
+h <- data[, 1]
+f <- data[, 2]
+MI <- data[, 3]
+CR <- data[, 4]
+s <- h + MI
+n <- f + CR
+
+data <- list(h=h, f=f, s=s, n=n, k=k) # To be passed on to Stan
+
+myinits <- list(
+  list(d=rep(0, k), c=rep(0, k)))
+
+# Parameters to be monitored
+parameters <- c("c", "d", "thetaf", "thetah")
+
+data
+
+```
+
+```{r}
+
+m1 <- stan(file = "sdt_1.stan",
+           pars = parameters,
+           init = myinits,
+           chains = 1,
+           data = data)
+
+# m1 <- cmdstan_model("sdt_1.stan")
+
+```
+
+```{r}
+
+str(rstan::extract(m1))
+
+```
+
+```{r}
+
+c1 <- rstan::extract(m1)$c %>% as_tibble() %>%
+  pivot_longer(cols = everything(), names_to = "expts", values_to = "pden") %>% 
+  ggplot(aes(x = pden, col = expts)) + geom_density() + xlab("Bias")
+
+d1 <- rstan::extract(m1)$d %>% as_tibble() %>%
+  pivot_longer(cols = everything(), names_to = "expts", values_to = "pden") %>% 
+  ggplot(aes(x = pden, col = expts)) + geom_density() + xlab("Discriminability")
+
+h1 <- rstan::extract(m1)$thetah %>% as_tibble() %>%
+  pivot_longer(cols = everything(), names_to = "expts", values_to = "pden") %>% 
+  ggplot(aes(x = pden, col = expts)) + geom_density() + xlab("Hit Rate")
+
+f1 <- rstan::extract(m1)$thetaf %>% as_tibble() %>%
+  pivot_longer(cols = everything(), names_to = "expts", values_to = "pden") %>% 
+  ggplot(aes(x = pden, col = expts)) + geom_density() + xlab("False alarm rate")
+
+grid.arrange(d1, c1, h1, f1, ncol=2)
+
+```
+
