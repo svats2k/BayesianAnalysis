@@ -1,0 +1,79 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r, echo=F, include=F}
+
+source("../init_settings.R")
+
+```
+
+```{r}
+
+data <- list(N = 100)
+
+# fit <- stan(file = "learn_ppc.stan",
+#             data = data,
+#             cores = 4, chains = 4)
+
+mod <- cmdstan_model(stan_file = "learn_ppc.stan")
+
+fit10 <- mod$sample(data = list(N=10))
+fit100 <- mod$sample(data = list(N=100))
+fit1000 <- mod$sample(data = list(N=1000))
+```
+
+```{r}
+
+mu_10 <- fit10$draws()[,,"mu"] %>% as_tibble() %>% 
+  pivot_longer(cols = everything(), names_to = "chains", values_to = "mu") %>% 
+  mutate(fit="f10")
+mu_100 <- fit100$draws()[,,"mu"] %>% as_tibble() %>% 
+  pivot_longer(cols = everything(), names_to = "chains", values_to = "mu") %>% 
+  mutate(fit="f100")
+mu_1000 <- fit1000$draws()[,,"mu"] %>% as_tibble() %>% 
+  pivot_longer(cols = everything(), names_to = "chains", values_to = "mu") %>% 
+  mutate(fit="f1000")
+
+mu_data <- rbind(mu_10, mu_100, mu_1000)
+
+```
+
+```{r}
+sig_10 <- fit10$draws()[,,"sigma"] %>% as_tibble() %>% 
+  pivot_longer(cols = everything(), names_to = "chains", values_to = "sigma") %>% 
+  mutate(fit="f10")
+sig_100 <- fit100$draws()[,,"sigma"] %>% as_tibble() %>% 
+  pivot_longer(cols = everything(), names_to = "chains", values_to = "sigma") %>% 
+  mutate(fit="f100")
+sig_1000 <- fit1000$draws()[,,"sigma"] %>% as_tibble() %>% 
+  pivot_longer(cols = everything(), names_to = "chains", values_to = "sigma") %>% 
+  mutate(fit="f1000")
+
+sig_data <- rbind(sig_10, sig_100, sig_1000)
+```
+
+```{r}
+
+p1 <- mu_data %>% 
+  ggplot(aes(x = mu, col = fit, fill = fit)) + geom_density(alpha = 0.2)
+
+p2 <- sig_data %>% 
+  ggplot(aes(x = sigma, col = fit, fill = fit)) + geom_density(alpha = 0.2)
+
+grid.arrange(p1, p2, nrow = 1)
+
+```
+
+```{r}
+fit100$draws()[,,"yrep[2]"]
+```
+
+```{r}
+
+fit10$draws() %>%  str
+
+```
+
