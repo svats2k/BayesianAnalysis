@@ -1,0 +1,53 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Sourcing the libraries
+```{r, include=F, echo=F}
+source("../init_settings.R")
+```
+
+
+A bayesian change point tutorial from 
+
+```{r}
+x1 <- rnorm(41, mean = 15, sd = 1.5)
+x2 <- rnorm(79, mean = 17, sd = 1.1)
+
+x <- c(x1, x2)
+
+plot(x, type = "l")
+
+```
+
+```{r}
+
+fit <- stan(file = "change-point.stan", 
+            data = list(N = length(x), D = x),
+            chains = 4, cores = 4,
+            iter = 2000, warmup = 1000, 
+            refresh = 200,
+            control = list(adapt_delta = 1 - 1e-3,
+                           max_treedepth = 15))
+
+```
+
+```{r}
+
+rstan::extract(fit)
+
+```
+
+```{r}
+
+rstan::extract(fit)$tau %>%
+  as_tibble() %>% 
+  ggplot(aes(x = value)) + geom_histogram(binwidth = 1)
+
+```
+
+```{r}
+plot(fit, pars=c("tau"))
+```
+
