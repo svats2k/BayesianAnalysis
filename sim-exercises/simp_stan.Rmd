@@ -16,7 +16,7 @@ rstan_options(auto_write = TRUE)
 
 ```
 
-Simple bernoulli model
+# Simple bernoulli model
 
 ```{r}
 
@@ -70,6 +70,8 @@ ggplot() +
   aes(x = x, y = y))
 
 ```
+
+# Simple binomial model
 
 ```{r}
 
@@ -126,7 +128,6 @@ ggplot() + true_posterior +
   aes(x = x, y = y))
 
 ```
-
 
 # Simple gaussian model - just simualtions
 
@@ -210,6 +211,127 @@ rstan::extract(bm_fit,
   ggplot(aes(x = draws, y = p, col = chains)) +
     geom_line() +
     geom_vline(xintercept = num_iters/2)
+
+```
+
+## Visualization
+```{r}
+
+un_fit <- stan(file = "unit_norm_prob.stan")
+
+rstan::extract(un_fit) %>% as_tibble() %>%
+  ggplot(aes(x = y)) + geom_density()
+
+```
+
+# Simple mixture distribution
+```{r}
+
+m_fit <- stan(file = "simp_mix.stan",
+              iter = 140000, warmup = 130000)
+
+```
+
+```{r}
+rstan::extract(m_fit) %>% as_tibble() %>% ggplot(aes(x = y)) + geom_density()
+```
+
+```{r}
+rstan::extract(m_fit,
+               permuted = FALSE,
+               inc_warmup = TRUE,
+               pars = c("lp__"),
+               include = FALSE) %>%
+  as_tibble() %>%
+  select(ends_with("y")) %>% 
+  mutate(draws = row_number()) %>% 
+  pivot_longer(cols = -draws, names_to = "chains", values_to = "y") %>% 
+  ggplot(aes(x = draws, y = y, col = chains)) +
+    geom_line() +
+    geom_vline(xintercept = 140000/2) +
+    facet_grid(chains~.)
+
+```
+
+```{r}
+N_samples <- 200;
+mu <- c(-10, 10);
+sigma <- c(1, 1);
+lambda <- 0.4;
+
+b_draw <- rbinom(n = N_samples, size = 1, prob = lambda)
+
+mu_samp <- mu[b_draw]
+sigma_samp <- sigma[b_draw]
+
+y <- rnorm(N_samples, mu_samp, sigma_samp)
+
+data_list <- list(N = N_samples, y = y)
+
+lm_fit <- stan(file = "learn_mix.stan",
+               data = data_list,
+               iter = 30000, warmup = 20000,
+               control = list(adapt_delta = 0.95))
+
+```
+
+```{r, fig.width=12, fig.height=6}
+
+summary(lm_fit)
+
+rstan::extract(lm_fit) %>%
+  as.data.frame() %>% 
+  as_tibble() %>% 
+  select(-lp__) %>%
+  pivot_longer(cols = everything(), names_to = "params", values_to = "vals") %>% 
+  ggplot(aes(x = vals, col = params)) + geom_density() + facet_wrap(params~., scales = "free")
+
+rstan::extract(lm_fit,
+               permuted = FALSE,
+               inc_warmup = TRUE,
+               pars = c("lp__"),
+               include = FALSE) %>%
+  as_tibble() %>%
+  select(ends_with("mu[1]")) %>% 
+  mutate(draws = row_number()) %>% 
+  pivot_longer(cols = -draws, names_to = "chains", values_to = "mu") %>% 
+  ggplot(aes(x = draws, y = mu, col = chains)) +
+    geom_line() +
+    geom_vline(xintercept = 30000/2) +
+    facet_grid(chains~.)
+
+```
+
+```{r}
+
+data_list <- list(N = 20000, mu = 3, sigma = 0.5)
+
+m <- stan(file = "categ.stan",
+          data = data_list,
+          algorithm = "Fixed_param",
+          iter = 1, chains = 1)
+
+t(rstan::extract(m)$y_pred) %>% as_tibble() %>% ggplot(aes(x = V1)) + geom_density()
+
+```
+
+```{r}
+
+data_list <- list(N = 200, theta = 0.2)
+m <- stan(file = "simp_bern.stan",
+          data = data_list,
+          algorithm = "Fixed_param",
+          iter = 1, chains = 1)
+
+t(rstan::extract(m)$y) %>% as_tibble() %>% mutate(V1 = as.factor(V1)) %>%
+  ggplot(aes(x = V1)) +
+    geom_bar(aes(y = (..count..)/sum(..count..))) +
+    scale_y_continuous(labels=scales::percent)
+
+```
+
+```{r}
+
 
 ```
 

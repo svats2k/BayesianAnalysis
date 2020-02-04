@@ -221,3 +221,77 @@ expand_grid(
 
 ```
 
+```{r}
+
+d <- d %>% mutate(age_band = case_when(age < 18 ~ "0_l18",
+                                       age < 30 ~ "1_l30",
+                                       age < 45 ~ "2_l45",
+                                       age < 60 ~ "3_l60",
+                                       TRUE ~ "4_g60"))
+
+
+mu_h_d <- mean(d2$height)
+sd_h_d <- sd(d2$height)
+
+mu_a_d <- mean(d$age)
+sd_a_d <- sd(d$age)
+
+mu_w_d <- mean(d$weight)
+sd_w_d <- sd(d$weight)
+
+d$scaled_height <- (d$height - mu_h_d) / sd_h_d
+d$scaled_weight <- (d$weight - mu_w_d) / sd_w_d
+d$scaled_age <- (d$age - mu_a_d) / sd_a_d
+
+
+
+```
+
+Looking at height vs weight for different age bands
+
+```{r}
+
+d %>% 
+  ggplot(aes(x = weight, y = height, col = age_band)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = F)
+
+
+```
+
+```{r}
+mfile <- "models/hm_5"
+# file.remove(paste0(mfile, ".rds"))
+
+hm_5 <- brm(family = lognormal, data = d,
+            formula = height ~ 1 + (scaled_weight|age_band),
+            cores = 4, chains = 4,
+            sample_prior = T,
+            control = list(adapt_delta = 1 - 1e-4,
+                           max_treedepth = 15),
+            file = mfile)
+
+```
+
+```{r}
+expand_grid(
+  age_band = unique(d$age_band),
+  scaled_weight = seq(-2, 2, length.out = 20)
+) %>%
+  add_predicted_draws(hm_5) %>%
+  mutate(height = .prediction) %>%
+  median_qi(height) %>% 
+  mutate(weight = scaled_weight * sd_w + mu_w) %>% 
+  ggplot(aes(x = weight, y = height, ymax = .upper, ymin = .lower, fill = age_band)) + geom_ribbon(alpha = 0.2)
+
+expand_grid(
+  age_band = unique(d$age_band),
+  scaled_weight = seq(-2, 2, length.out = 20)
+) %>%
+  add_fitted_draws(hm_5) %>%
+  mutate(height = .value) %>%
+  median_qi(height) %>% 
+  mutate(weight = scaled_weight * sd_w + mu_w) %>% 
+  ggplot(aes(x = weight, y = height, ymax = .upper, ymin = .lower, fill = age_band)) + geom_ribbon(alpha = 0.2)
+```
+

@@ -10,20 +10,72 @@ source("../init_settings.R")
 
 ```
 
+Input data
 ```{r}
 
-data <- list(N = 100)
+mu <- 20
+sigma <- 5
 
-# fit <- stan(file = "learn_ppc.stan",
-#             data = data,
-#             cores = 4, chains = 4)
+```
+
+
+```{r}
+
+N <- 10
+x <- seq(from = 0, to = 10, length.out = N)
+y <- rnorm(N, 2 * x, 0.5)
+
+N_pred <- 5
+xpred <- seq(from = 0, to = 4, length.out = N_pred)
+
+data <- list(N = N,
+             x = x,
+             y = y,
+             N_pred = N_pred,
+             xpred = xpred)
+
+```
+
+```{r}
 
 mod <- cmdstan_model(stan_file = "learn_ppc.stan")
 
-fit10 <- mod$sample(data = list(N=10))
-fit100 <- mod$sample(data = list(N=100))
-fit1000 <- mod$sample(data = list(N=1000))
+fit <- mod$sample(data = data)
+# fit100 <- mod$sample(data = list(N=100, y = rnorm(100, mu, sigma)))
+# fit1000 <- mod$sample(data = list(N=1000, y = rnorm(1000, mu, sigma)))
+
 ```
+
+```{r}
+
+fit <- stan(file = "learn_ppc.stan", data = data)
+
+```
+
+
+```{r}
+rstan::extract(fit) %>%  str
+
+yrep <- rstan::extract(fit)$yrep
+yrep_stn <- rstan::extract(fit)$yrep_stn
+
+```
+
+
+```{r}
+
+ppc_dens_overlay(y, yrep[1:100,])
+ppc_hist(y, yrep[1:10,])
+
+ppc_stat(y, yrep, stat="max")
+ppc_stat(y, yrep, stat="min")
+ppc_stat(y, yrep, stat="mean")
+ppc_stat(y, yrep, stat="sum")
+ppc_stat(y, yrep, stat="sd")
+ppc_stat(y, yrep, stat="median")
+
+```
+
 
 ```{r}
 
@@ -68,12 +120,6 @@ grid.arrange(p1, p2, nrow = 1)
 ```
 
 ```{r}
-fit100$draws()[,,"yrep[2]"]
-```
 
-```{r}
-
-fit10$draws() %>%  str
 
 ```
-
